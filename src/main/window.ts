@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { readFileSync } from 'fs'
-import { BrowserWindow, Menu, screen, shell, type IpcMainEvent } from 'electron'
+import { app, BrowserWindow, Menu, screen, shell, type IpcMainEvent } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { getAppConfig } from './config'
@@ -104,6 +104,16 @@ export let mainWindow: BrowserWindow | null = null
 let quitTimeout: NodeJS.Timeout | null = null
 let createWindowPromise: Promise<void> | null = null
 let initialRendererReady = false
+
+// macOS 的应用激活在启动瞬间就结束了，而窗口要等 renderer 首屏就绪才 show，
+// 期间焦点已被其他应用拿走；show() 不会把应用带回前台，需显式抢焦点（轻量模式重开置顶）。
+function showAndFocus(window: BrowserWindow): void {
+  window.show()
+  window.focusOnWebView()
+  if (process.platform === 'darwin') {
+    app.focus({ steal: true })
+  }
+}
 
 // 窗口在 renderer 首屏内容（路由 + 侧边栏）就绪后再显示，避免 lazy chunk 未加载完就展示空白主区。
 function waitForInitialContent(window: BrowserWindow): Promise<void> {
@@ -245,8 +255,7 @@ async function createWindowInternal(): Promise<void> {
   // 开发模式下始终显示窗口
   if (!silentStart || is.dev) {
     clearQuitTimeout()
-    mainWindow.show()
-    mainWindow.focusOnWebView()
+    showAndFocus(mainWindow)
   }
 }
 
@@ -281,10 +290,9 @@ function setupWindowEvents(window: BrowserWindow): void {
     if (wasVisible || !initialRendererReady) {
       void createWindow()
         .then(() => {
-          if (wasVisible) {
+          if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
             clearQuitTimeout()
-            mainWindow?.show()
-            mainWindow?.focusOnWebView()
+            showAndFocus(mainWindow)
           }
         })
         .catch((error) => mainWindowLogger.error('Failed to recover main window', error))
@@ -394,15 +402,15 @@ export function showMainWindow(): void {
     if (mainWindow.webContents.isCrashed()) {
       mainWindow.webContents.reload()
     }
-    mainWindow.show()
-    mainWindow.focusOnWebView()
+    showAndFocus(mainWindow)
     return
   }
 
   void createWindow().then(() => {
     clearQuitTimeout()
-    mainWindow?.show()
-    mainWindow?.focusOnWebView()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      showAndFocus(mainWindow)
+    }
   })
 }
 
