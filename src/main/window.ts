@@ -10,6 +10,7 @@ import { hideDockIcon, showDockIcon } from './resolve/tray'
 import { dataDir } from './utils/dirs'
 import { mainWindowLogger } from './utils/logger'
 import { atomicWriteFileSync } from './utils/safeFile'
+import { APP_ID } from '../shared/appConfig'
 
 interface WindowState {
   width: number
@@ -112,8 +113,11 @@ async function showAndFocus(window: BrowserWindow): Promise<void> {
   if (process.platform === 'darwin') {
     // useDockIcon=false 时关窗会 app.dock.hide() 进入 accessory 策略，
     // accessory 应用的窗口无法成为前台活动窗口，必须先恢复 regular 再 show。
-    if (app.dock && !app.dock.isVisible()) {
-      await app.dock.show()
+    // dock 恢复失败也不阻断 show，窗口必须照常显示。
+    try {
+      await showDockIcon()
+    } catch (error) {
+      mainWindowLogger.warn('Failed to restore dock icon before showing window', error)
     }
   }
 
@@ -126,13 +130,9 @@ async function showAndFocus(window: BrowserWindow): Promise<void> {
     // 前台时，通过 AppleEvent 激活自己兜底（应用激活自身无需自动化授权）。
     setTimeout(() => {
       if (!window.isDestroyed() && !window.isFocused()) {
-        execFile(
-          'osascript',
-          ['-e', 'tell application id "party.mihomo.app" to activate'],
-          (error) => {
-            if (error) void mainWindowLogger.warn('osascript activate fallback failed', error)
-          }
-        )
+        execFile('osascript', ['-e', `tell application id "${APP_ID}" to activate`], (error) => {
+          if (error) void mainWindowLogger.warn('osascript activate fallback failed', error)
+        })
       }
     }, 300)
   }

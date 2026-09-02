@@ -4,6 +4,7 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { app, dialog, ipcMain } from 'electron'
 import i18next from 'i18next'
 import { initI18n } from '../shared/i18n'
+import { APP_ID } from '../shared/appConfig'
 import { registerIpcMainHandlers } from './utils/ipc'
 import { getAppConfig, patchAppConfig } from './config'
 import {
@@ -281,7 +282,7 @@ async function ensureNoHighPrivilegeCore(isAdmin: boolean): Promise<boolean> {
 app
   .whenReady()
   .then(async () => {
-    electronApp.setAppUserModelId('party.mihomo.app')
+    electronApp.setAppUserModelId(APP_ID)
 
     const { appConfig, adminPromise } = await initPromise
     beginCoreInitialization()

@@ -1,3 +1,6 @@
+// 与 electron-builder.yml 的 appId 保持一致：Windows AUMID 与 macOS bundle id 共用
+export const APP_ID = 'party.mihomo.app'
+
 export const DEFAULT_CONTROL_DNS = false
 
 export const DEFAULT_CONTROL_SNIFF = true
