@@ -1,5 +1,6 @@
 import { join } from 'path'
 import { readFileSync } from 'fs'
+import { execFile } from 'child_process'
 import { app, BrowserWindow, Menu, screen, shell, type IpcMainEvent } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -107,11 +108,33 @@ let initialRendererReady = false
 
 // macOS 的应用激活在启动瞬间就结束了，而窗口要等 renderer 首屏就绪才 show，
 // 期间焦点已被其他应用拿走；show() 不会把应用带回前台，需显式抢焦点（轻量模式重开置顶）。
-function showAndFocus(window: BrowserWindow): void {
+async function showAndFocus(window: BrowserWindow): Promise<void> {
+  if (process.platform === 'darwin') {
+    // useDockIcon=false 时关窗会 app.dock.hide() 进入 accessory 策略，
+    // accessory 应用的窗口无法成为前台活动窗口，必须先恢复 regular 再 show。
+    if (app.dock && !app.dock.isVisible()) {
+      await app.dock.show()
+    }
+  }
+
   window.show()
   window.focusOnWebView()
+
   if (process.platform === 'darwin') {
     app.focus({ steal: true })
+    // macOS 14+ 收紧了跨应用抢焦点，steal 可能不生效；短暂等待后窗口仍未成为
+    // 前台时，通过 AppleEvent 激活自己兜底（应用激活自身无需自动化授权）。
+    setTimeout(() => {
+      if (!window.isDestroyed() && !window.isFocused()) {
+        execFile(
+          'osascript',
+          ['-e', 'tell application id "party.mihomo.app" to activate'],
+          (error) => {
+            if (error) void mainWindowLogger.warn('osascript activate fallback failed', error)
+          }
+        )
+      }
+    }, 300)
   }
 }
 
@@ -255,7 +278,7 @@ async function createWindowInternal(): Promise<void> {
   // 开发模式下始终显示窗口
   if (!silentStart || is.dev) {
     clearQuitTimeout()
-    showAndFocus(mainWindow)
+    void showAndFocus(mainWindow)
   }
 }
 
@@ -292,7 +315,7 @@ function setupWindowEvents(window: BrowserWindow): void {
         .then(() => {
           if (wasVisible && mainWindow && !mainWindow.isDestroyed()) {
             clearQuitTimeout()
-            showAndFocus(mainWindow)
+            void showAndFocus(mainWindow)
           }
         })
         .catch((error) => mainWindowLogger.error('Failed to recover main window', error))
@@ -402,14 +425,14 @@ export function showMainWindow(): void {
     if (mainWindow.webContents.isCrashed()) {
       mainWindow.webContents.reload()
     }
-    showAndFocus(mainWindow)
+    void showAndFocus(mainWindow)
     return
   }
 
   void createWindow().then(() => {
     clearQuitTimeout()
     if (mainWindow && !mainWindow.isDestroyed()) {
-      showAndFocus(mainWindow)
+      void showAndFocus(mainWindow)
     }
   })
 }
