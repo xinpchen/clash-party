@@ -1,6 +1,6 @@
 {
   "name": "mihomo-party",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Clash Party",
   "type": "module",
   "main": "./out/main/index.js",
@@ -129,5 +129,5 @@
     "vite-plugin-monaco-editor": "^1.1.0",
     "vitest": "4.1.10"
   },
-  "packageManager": "pnpm@11.8.0"
+  "packageManager": "pnpm@11.25.0"
 }
