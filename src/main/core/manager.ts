@@ -55,6 +55,8 @@ import {
 import {
   cleanupSocketFile,
   cleanupWindowsNamedPipes,
+  coreShutdownTimeout,
+  ensureCoreProcessExited,
   validateWindowsPipeAccess,
   waitForCoreReady,
   verifyProcessOwner
@@ -83,7 +85,6 @@ const execFilePromise = promisify(execFile)
 const ctlParam = process.platform === 'win32' ? '-ext-ctl-pipe' : '-ext-ctl-unix'
 const coreHookTimeout = 30000
 const automaticRestartDelay = 750
-const coreShutdownTimeout = 500
 const coreProcessNames = ['mihomo', 'mihomo-alpha', 'mihomo-smart'] as const
 
 // 核心进程状态
@@ -804,7 +805,13 @@ async function stopCoreInternal(force = false, cancelStartup = true): Promise<vo
     }
   }
 
+  const previousChild = child
   stopCoreProcessAndStreams(cancelStartup)
+  // darwin 下旧核心优雅退出可能耗时较长，等它真正退出（必要时 SIGKILL）再继续，
+  // 避免轻量模式的新 detached 核心绑不上端口和 TUN。
+  if (process.platform === 'darwin') {
+    await ensureCoreProcessExited(previousChild)
+  }
 
   await cleanupStoppedCoreResources()
 }
@@ -858,30 +865,10 @@ export async function stopCoreForExit(): Promise<void> {
 
 setStopCoreBeforeAdminRestart(stopCore)
 
-async function ensureCoreProcessExited(proc: ChildProcess | null): Promise<void> {
-  if (!proc) return
-
-  const waitForExit = async (): Promise<boolean> => {
-    const deadline = Date.now() + coreShutdownTimeout
-    while (proc.exitCode === null && proc.signalCode === null && Date.now() < deadline) {
-      await delay(50)
-    }
-    return proc.exitCode !== null || proc.signalCode !== null
-  }
-
-  if (await waitForExit()) return
-  managerLogger.warn(`Core PID ${proc.pid ?? 'unknown'} did not exit after SIGINT; sending SIGKILL`)
-  proc.kill('SIGKILL')
-  if (!(await waitForExit())) {
-    throw new Error(`Core PID ${proc.pid ?? 'unknown'} is still running after SIGKILL`)
-  }
-}
-
 async function restartCoreOnce(forceStop: boolean): Promise<void> {
+  // stopCoreInternal 在 darwin 上已确保旧核心完全退出后才返回
   const startAttempt = await runCoreOperation(async () => {
-    const previousChild = child
     await stopCoreInternal(forceStop)
-    if (process.platform === 'darwin') await ensureCoreProcessExited(previousChild)
     return startCoreInternal(false, true)
   })
   await startAttempt.readiness

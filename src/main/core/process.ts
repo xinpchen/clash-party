@@ -1,5 +1,6 @@
-import { exec, execFile } from 'child_process'
+import { exec, execFile, type ChildProcess } from 'child_process'
 import { promisify } from 'util'
+import { setTimeout as delay } from 'timers/promises'
 import { rm } from 'fs/promises'
 import { existsSync } from 'fs'
 import { managerLogger } from '../utils/logger'
@@ -11,6 +12,28 @@ const execFilePromise = promisify(execFile)
 // 常量
 const CORE_READY_MAX_RETRIES = 30
 const CORE_READY_RETRY_INTERVAL_MS = 100
+export const coreShutdownTimeout = 500
+
+// darwin 下 SIGINT 优雅退出可能远超预期（TUN/DNS/系统代理还原可能挂住），
+// 复用端口和 TUN 前必须确认旧核心真正退出，否则新核心会绑不上端口成为"聋子"核心。
+export async function ensureCoreProcessExited(proc: ChildProcess | null): Promise<void> {
+  if (!proc) return
+
+  const waitForExit = async (): Promise<boolean> => {
+    const deadline = Date.now() + coreShutdownTimeout
+    while (proc.exitCode === null && proc.signalCode === null && Date.now() < deadline) {
+      await delay(50)
+    }
+    return proc.exitCode !== null || proc.signalCode !== null
+  }
+
+  if (await waitForExit()) return
+  managerLogger.warn(`Core PID ${proc.pid ?? 'unknown'} did not exit after SIGINT; sending SIGKILL`)
+  proc.kill('SIGKILL')
+  if (!(await waitForExit())) {
+    throw new Error(`Core PID ${proc.pid ?? 'unknown'} is still running after SIGKILL`)
+  }
+}
 
 export async function cleanupSocketFile(): Promise<void> {
   if (process.platform === 'win32') {
