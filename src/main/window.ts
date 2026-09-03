@@ -1,6 +1,8 @@
 import { join } from 'path'
 import { readFileSync } from 'fs'
 import { execFile } from 'child_process'
+import { promisify } from 'util'
+import { setTimeout as delay } from 'timers/promises'
 import { app, BrowserWindow, Menu, screen, shell, type IpcMainEvent } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -11,6 +13,8 @@ import { dataDir } from './utils/dirs'
 import { mainWindowLogger } from './utils/logger'
 import { atomicWriteFileSync } from './utils/safeFile'
 import { APP_ID } from '../shared/appConfig'
+
+const execFilePromise = promisify(execFile)
 
 interface WindowState {
   width: number
@@ -108,33 +112,44 @@ let createWindowPromise: Promise<void> | null = null
 let initialRendererReady = false
 
 // macOS 的应用激活在启动瞬间就结束了，而窗口要等 renderer 首屏就绪才 show，
-// 期间焦点已被其他应用拿走；show() 不会把应用带回前台，需显式抢焦点（轻量模式重开置顶）。
+// 期间焦点已被其他应用拿走。必须先把应用激活到位再显示窗口：先 show 后激活时，
+// 窗口会先闪现一次，激活事件再触发台前调度把窗口从侧边重新滑入（双重视觉跳变）。
 async function showAndFocus(window: BrowserWindow): Promise<void> {
   if (process.platform === 'darwin') {
     // useDockIcon=false 时关窗会 app.dock.hide() 进入 accessory 策略，
-    // accessory 应用的窗口无法成为前台活动窗口，必须先恢复 regular 再 show。
+    // accessory 应用的窗口无法成为前台活动窗口，必须先恢复 regular 再激活。
     // dock 恢复失败也不阻断 show，窗口必须照常显示。
     try {
       await showDockIcon()
     } catch (error) {
       mainWindowLogger.warn('Failed to restore dock icon before showing window', error)
     }
+    await activateAppBeforeShow()
   }
 
   window.show()
   window.focusOnWebView()
+}
 
-  if (process.platform === 'darwin') {
-    app.focus({ steal: true })
-    // macOS 14+ 收紧了跨应用抢焦点，steal 可能不生效；短暂等待后窗口仍未成为
-    // 前台时，通过 AppleEvent 激活自己兜底（应用激活自身无需自动化授权）。
-    setTimeout(() => {
-      if (!window.isDestroyed() && !window.isFocused()) {
-        execFile('osascript', ['-e', `tell application id "${APP_ID}" to activate`], (error) => {
-          if (error) void mainWindowLogger.warn('osascript activate fallback failed', error)
-        })
-      }
-    }, 300)
+// 窗口可见前完成激活：此时窗口还不可见，台前调度无内容可动画；
+// 激活完成后 show，窗口直接落在当前 stage，不再有滑入动画。
+async function activateAppBeforeShow(): Promise<void> {
+  if (app.isActive()) return
+
+  app.focus({ steal: true })
+  // steal 在部分系统上不生效，短暂轮询确认；生效即返回，避免多余激活事件。
+  const deadline = Date.now() + 200
+  while (!app.isActive() && Date.now() < deadline) {
+    await delay(25)
+  }
+  if (app.isActive()) return
+
+  // macOS 14+ 收紧了跨应用抢焦点，steal 被忽略时通过 AppleEvent 激活自己
+  //（应用激活自身无需自动化授权）。窗口尚未显示，激活不会引起视觉跳变。
+  try {
+    await execFilePromise('osascript', ['-e', `tell application id "${APP_ID}" to activate`])
+  } catch (error) {
+    mainWindowLogger.warn('osascript activate failed', error)
   }
 }
 
