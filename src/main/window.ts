@@ -119,10 +119,16 @@ async function showAndFocus(window: BrowserWindow): Promise<void> {
     // useDockIcon=false 时关窗会 app.dock.hide() 进入 accessory 策略，
     // accessory 应用的窗口无法成为前台活动窗口，必须先恢复 regular 再激活。
     // dock 恢复失败也不阻断 show，窗口必须照常显示。
+    const dockWasHidden = !app.dock?.isVisible()
     try {
       await showDockIcon()
     } catch (error) {
       mainWindowLogger.warn('Failed to restore dock icon before showing window', error)
+    }
+    if (dockWasHidden) {
+      // accessory→regular 的策略切换在 AppKit 侧异步生效，留出落定时间再激活，
+      // 避免激活被进行中的策略转换吞掉。
+      await delay(200)
     }
     await activateAppBeforeShow()
   }

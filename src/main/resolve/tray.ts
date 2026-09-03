@@ -402,7 +402,7 @@ export const buildContextMenu = async (): Promise<Menu> => {
 }
 
 export async function createTray(): Promise<void> {
-  const { useDockIcon = true, swapTrayClick = false } = await getAppConfig()
+  const { useDockIcon = true, swapTrayClick = false, silentStart = false } = await getAppConfig()
   if (process.platform === 'linux') {
     tray = new Tray(pngIcon)
     trayMenu = await buildContextMenu()
@@ -422,7 +422,11 @@ export async function createTray(): Promise<void> {
   await updateTrayIcon()
 
   if (process.platform === 'darwin') {
-    if (!useDockIcon) {
+    // 启动即显示主窗口时不能藏 dock 图标：createTray 与窗口 show 几乎同时执行，
+    // show 之后的 dock.hide 会把应用降为 accessory 策略，台前调度会立刻把窗口甩回
+    // 侧边并取消激活（窗口闪现后不前置、需再点一次）。关窗时 close handler 会
+    // 按配置隐藏，这里只在静默启动（无窗口）时隐藏。
+    if (!useDockIcon && silentStart) {
       hideDockIcon()
     }
     // 移除旧监听器防止累积
