@@ -5,6 +5,7 @@ import { getAppConfig, patchAppConfig, patchControledMihomoConfig } from '../con
 import { changeCurrentProfile, getProfileConfig } from '../config/profile'
 import { patchMihomoConfig } from '../core/mihomoApi'
 import { refreshUnderlayDnsOnNetworkChange } from '../core/underlayDns'
+import { refreshSystemDnsOnNetworkChange } from '../core/dns'
 import { mainWindow } from '../window'
 import { getDefaultDevice } from '../core/manager'
 import { updateTrayIcon } from '../resolve/tray'
@@ -127,10 +128,11 @@ async function handleSSIDChange(): Promise<void> {
   }
 }
 
-// 网络变化统一入口：SSID 相关处理 + underlay DNS 刷新（各自内部再做变化检测）
+// 网络变化统一入口：SSID 相关处理 + underlay DNS 刷新 + 系统 DNS 补接管（各自内部做变化检测/幂等）
 function runNetworkChangeHandlers(): void {
   handleSSIDChange()
   void refreshUnderlayDnsOnNetworkChange()
+  void refreshSystemDnsOnNetworkChange()
 }
 
 function startDarwinNetworkWatcher(): void {

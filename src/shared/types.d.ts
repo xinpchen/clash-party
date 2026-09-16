@@ -336,6 +336,8 @@ interface IAppConfig {
   diffWorkDir?: boolean
   autoSetDNS?: boolean
   originDNS?: string
+  /** macOS 多网络服务接管时记录的各服务 pre-TUN DNS（服务名 → 'Empty' 或 DNS 列表） */
+  originDNSMap?: { [service: string]: string }
   useWindowFrame: boolean
   proxyInTray: boolean
   showCurrentProxyInTray: boolean
