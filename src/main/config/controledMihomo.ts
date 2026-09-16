@@ -10,6 +10,7 @@ import { createLogger } from '../utils/logger'
 import { atomicWriteFile, WriteQueue } from '../utils/safeFile'
 import { DEFAULT_CONTROL_DNS, DEFAULT_CONTROL_SNIFF } from '../../shared/appConfig'
 import { getAppConfig, patchAppConfig } from './app'
+import { recoverDNS, setPublicDNS, tunDnsTransition } from '../core/dns'
 
 const controledMihomoLogger = createLogger('ControledMihomo')
 
@@ -61,7 +62,8 @@ export async function patchControledMihomoConfig(patch: Partial<IMihomoConfig>):
     const {
       controlDns = DEFAULT_CONTROL_DNS,
       controlSniff = DEFAULT_CONTROL_SNIFF,
-      controlDnsBeforePause
+      controlDnsBeforePause,
+      autoSetDNS = true
     } = appConfig
     const nextConfig = JSON.parse(
       JSON.stringify(controledMihomoConfig || cloneDefaultControledMihomoConfig())
@@ -74,6 +76,9 @@ export async function patchControledMihomoConfig(patch: Partial<IMihomoConfig>):
       }
     }
     let restoreDnsState = false
+    // 记录 TUN 迁移方向（须在 merge 前取旧值）：核心运行中开关 TUN 走热更新，
+    // 不会经过核心重启的 DNS 接管/恢复，需要在此补齐系统 DNS 副作用
+    const prevTunEnable = nextConfig.tun?.enable
 
     // 当模式从 direct 切换到 rule/global 时，恢复之前保存的 DNS 状态
     const currentMode = nextConfig.mode
@@ -138,6 +143,21 @@ export async function patchControledMihomoConfig(patch: Partial<IMihomoConfig>):
         'Hot patch /configs failed, changes will apply on next restart',
         error
       )
+    }
+
+    // TUN 开/关的系统 DNS 副作用：开→接管（223.5.5.5），关→恢复各服务原值。
+    // 关闭 TUN 时核心不重启，必须在此显式恢复，否则系统 DNS 停留在 223.5.5.5。
+    if (process.platform === 'darwin' && autoSetDNS) {
+      const transition = tunDnsTransition(prevTunEnable, nextConfig.tun?.enable)
+      try {
+        if (transition === 'recover') {
+          await recoverDNS()
+        } else if (transition === 'takeover') {
+          await setPublicDNS()
+        }
+      } catch (error) {
+        controledMihomoLogger.warn(`Failed to apply system DNS on TUN ${transition}`, error)
+      }
     }
 
     // log-level 改变时重连日志 WebSocket，使新等级立刻生效

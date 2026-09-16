@@ -2,7 +2,7 @@ import { exec, execFile } from 'child_process'
 import { promisify } from 'util'
 import { net } from 'electron'
 import axios from 'axios'
-import { getAppConfig, patchAppConfig } from '../config'
+import { getAppConfig, patchAppConfig } from '../config/app'
 
 const execPromise = promisify(exec)
 const execFilePromise = promisify(execFile)
@@ -80,6 +80,20 @@ export function mergeLegacyOriginDNS(
 ): { [service: string]: string } {
   if (Object.keys(map).length > 0 || !legacyOriginDNS) return map
   return { [defaultService]: legacyOriginDNS }
+}
+
+// TUN 状态迁移方向：开→接管系统 DNS，关→恢复。状态未变化返回 null。
+// 核心运行中开关 TUN 走热更新路径（PATCH /configs），不经过核心重启的
+// recoverDNS/setPublicDNS，必须在配置补丁处补齐这两个方向的系统 DNS 副作用。
+export function tunDnsTransition(
+  prevEnable: boolean | undefined,
+  nextEnable: boolean | undefined
+): 'takeover' | 'recover' | null {
+  // undefined（未配置 TUN）视同关闭
+  const prev = prevEnable === true
+  const next = nextEnable === true
+  if (prev === next) return null
+  return next ? 'takeover' : 'recover'
 }
 
 // ---------- 执行器 ----------

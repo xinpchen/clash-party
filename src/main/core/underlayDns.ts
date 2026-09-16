@@ -1,7 +1,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { isIP } from 'net'
-import { getAppConfig } from '../config'
+import { getAppConfig } from '../config/app'
 import { createLogger } from '../utils/logger'
 
 const execFilePromise = promisify(execFile)

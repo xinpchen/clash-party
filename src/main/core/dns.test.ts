@@ -8,7 +8,7 @@ vi.mock('axios', () => ({
   default: { post: vi.fn(async () => ({})) }
 }))
 
-vi.mock('../config', () => ({
+vi.mock('../config/app', () => ({
   getAppConfig: vi.fn(async () => ({}) as never),
   patchAppConfig: vi.fn(async () => ({}))
 }))
@@ -18,7 +18,8 @@ import {
   pickPhysicalServices,
   parseNetworkSetupDnsOutput,
   servicesToTakeOver,
-  mergeLegacyOriginDNS
+  mergeLegacyOriginDNS,
+  tunDnsTransition
 } from './dns'
 
 describe('parseNetworkServiceOrder', () => {
@@ -109,5 +110,22 @@ describe('mergeLegacyOriginDNS', () => {
 
   it('ignores missing legacy values', () => {
     expect(mergeLegacyOriginDNS({}, undefined, 'USB LAN')).toEqual({})
+  })
+})
+
+describe('tunDnsTransition', () => {
+  it('returns takeover when TUN is turned on', () => {
+    expect(tunDnsTransition(false, true)).toBe('takeover')
+    expect(tunDnsTransition(undefined, true)).toBe('takeover')
+  })
+
+  it('returns recover when TUN is turned off', () => {
+    expect(tunDnsTransition(true, false)).toBe('recover')
+  })
+
+  it('returns null when TUN state did not change', () => {
+    expect(tunDnsTransition(true, true)).toBeNull()
+    expect(tunDnsTransition(false, false)).toBeNull()
+    expect(tunDnsTransition(undefined, false)).toBeNull()
   })
 })
