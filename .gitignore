@@ -12,3 +12,7 @@ party.md
 CLAUDE.md
 agent.md
 tsconfig.node.tsbuildinfo
+
+# local tooling artifacts
+.gitnexusrc
+.v2c/
