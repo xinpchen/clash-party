@@ -3,8 +3,31 @@ import { promisify } from 'util'
 import { net } from 'electron'
 import axios from 'axios'
 import { getAppConfig, patchAppConfig } from '../config/app'
+import { createLogger } from '../utils/logger'
+import {
+  mergeLegacyOriginDNS,
+  parseNetworkServiceOrder,
+  parseNetworkSetupDnsOutput,
+  pickPhysicalServices,
+  planTakeOver,
+  PUBLIC_DNS,
+  tunDnsTransition
+} from './dnsPlan'
+
+export {
+  mergeLegacyOriginDNS,
+  parseNetworkServiceOrder,
+  parseNetworkSetupDnsOutput,
+  pickPhysicalServices,
+  planTakeOver,
+  PUBLIC_DNS,
+  tunDnsTransition
+}
+export type { NetworkServiceDevice, TakeOverPlan } from './dnsPlan'
+import type { NetworkServiceDevice } from './dnsPlan'
 
 const execPromise = promisify(exec)
+const dnsLogger = createLogger('DNS')
 const execFilePromise = promisify(execFile)
 const helperSocketPath = '/tmp/mihomo-party-helper.sock'
 
@@ -24,77 +47,7 @@ export async function getDefaultDevice(): Promise<string> {
   return device
 }
 
-// ---------- 纯函数：服务枚举解析与接管/恢复决策 ----------
-
-export interface NetworkServiceDevice {
-  service: string
-  device: string
-}
-
-// 解析 `networksetup -listnetworkserviceorder`：服务名与设备交替出现
-//   (1) USB 10/100/1000 LAN
-//   (Hardware Port: USB 10/100/1000 LAN, Device: en7)
-export function parseNetworkServiceOrder(output: string): NetworkServiceDevice[] {
-  const list: NetworkServiceDevice[] = []
-  let pendingService: string | null = null
-  for (const line of output.split('\n')) {
-    const serviceMatch = line.match(/^\(\d+\)\s+(.+)$/)
-    if (serviceMatch) {
-      pendingService = serviceMatch[1].trim()
-      continue
-    }
-    const deviceMatch = line.match(/Device:\s*(\S+)\s*\)/)
-    if (deviceMatch && pendingService) {
-      list.push({ service: pendingService, device: deviceMatch[1] })
-      pendingService = null
-    }
-  }
-  return list
-}
-
-// 只保留物理网络服务（en* 有线/Wi-Fi/USB 网卡/手机共享），
-// 排除 bridge、utun 等——TUN/VPN/桥接不应被写入公共 DNS。
-export function pickPhysicalServices(list: NetworkServiceDevice[]): NetworkServiceDevice[] {
-  return list.filter((item) => /^en\d+$/.test(item.device))
-}
-
-// `networksetup -getdnsservers` 输出 → 存储值：未设置记 'Empty'，多值合并为一行
-export function parseNetworkSetupDnsOutput(output: string): string {
-  if (output.startsWith("There aren't any DNS Servers set on")) return 'Empty'
-  return output.trim().replace(/\n/g, ' ')
-}
-
-// 需要接管的服务 = 当前活跃服务中尚未记录 origin 的（记录过的已是 223.5.5.5）
-export function servicesToTakeOver(
-  activeServices: string[],
-  originMap: { [service: string]: string }
-): string[] {
-  return activeServices.filter((service) => !(service in originMap))
-}
-
-// 兼容旧版单值 originDNS：map 为空且存在待恢复的旧值时，归并到默认服务名下
-export function mergeLegacyOriginDNS(
-  map: { [service: string]: string },
-  legacyOriginDNS: string | undefined,
-  defaultService: string
-): { [service: string]: string } {
-  if (Object.keys(map).length > 0 || !legacyOriginDNS) return map
-  return { [defaultService]: legacyOriginDNS }
-}
-
-// TUN 状态迁移方向：开→接管系统 DNS，关→恢复。状态未变化返回 null。
-// 核心运行中开关 TUN 走热更新路径（PATCH /configs），不经过核心重启的
-// recoverDNS/setPublicDNS，必须在配置补丁处补齐这两个方向的系统 DNS 副作用。
-export function tunDnsTransition(
-  prevEnable: boolean | undefined,
-  nextEnable: boolean | undefined
-): 'takeover' | 'recover' | null {
-  // undefined（未配置 TUN）视同关闭
-  const prev = prevEnable === true
-  const next = nextEnable === true
-  if (prev === next) return null
-  return next ? 'takeover' : 'recover'
-}
+// ---------- 纯决策函数在 ./dnsPlan（零依赖，便于测试） ----------
 
 // ---------- 执行器 ----------
 
@@ -173,19 +126,29 @@ async function writeOriginMap(map: { [service: string]: string }): Promise<void>
 
 // ---------- 公共 DNS 接管 / 恢复（多服务） ----------
 
-// 双连接（有线 + Wi-Fi）时对全部活跃物理服务接管：首次触碰的服务先记录 origin，
-// 已接管的服务跳过（幂等，不重复触发系统事件）。
+// 双连接（有线 + Wi-Fi）时对全部活跃物理服务接管。对照实际 DNS 幂等：
+// 已是 223.5.5.5 的服务跳过，其余（含 map 有记录但值漂移的）重新套用。
 async function takeOverPublicDNS(): Promise<void> {
   const map = await readOriginMap()
-  const active = await getActivePhysicalServices()
-  const pending = servicesToTakeOver(active, map)
-
-  for (const service of pending) {
-    map[service] = await getOriginDNSForService(service)
-    await setDNS(service, '223.5.5.5')
+  const services = await getActivePhysicalServices()
+  const currentDns: { [service: string]: string } = {}
+  for (const service of services) {
+    currentDns[service] = await getOriginDNSForService(service)
   }
-  if (pending.length > 0) {
-    await writeOriginMap(map)
+
+  const plan = planTakeOver(services, map, (service) => currentDns[service])
+  for (const { service } of plan.toSet) {
+    await setDNS(service, PUBLIC_DNS)
+  }
+  if (plan.toSet.length > 0) {
+    await writeOriginMap(plan.map)
+    dnsLogger.info(
+      `System DNS takeover applied to ${plan.toSet.length} service(s): ${plan.toSet
+        .map((t) => t.service)
+        .join(', ')}`
+    )
+  } else {
+    dnsLogger.debug('System DNS takeover: all active services already on public DNS')
   }
 }
 

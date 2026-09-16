@@ -1,26 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
-
-vi.mock('electron', () => ({
-  net: { isOnline: vi.fn(() => true) }
-}))
-
-vi.mock('axios', () => ({
-  default: { post: vi.fn(async () => ({})) }
-}))
-
-vi.mock('../config/app', () => ({
-  getAppConfig: vi.fn(async () => ({}) as never),
-  patchAppConfig: vi.fn(async () => ({}))
-}))
-
+import { describe, expect, it } from 'vitest'
 import {
   parseNetworkServiceOrder,
   pickPhysicalServices,
   parseNetworkSetupDnsOutput,
-  servicesToTakeOver,
+  planTakeOver,
+  PUBLIC_DNS,
   mergeLegacyOriginDNS,
   tunDnsTransition
-} from './dns'
+} from './dnsPlan'
 
 describe('parseNetworkServiceOrder', () => {
   const output = [
@@ -83,20 +70,6 @@ describe('parseNetworkSetupDnsOutput', () => {
   })
 })
 
-describe('servicesToTakeOver', () => {
-  it('returns active services not yet recorded in the origin map', () => {
-    const map = { 'Wi-Fi': '192.168.2.1' }
-    expect(servicesToTakeOver(['USB 10/100/1000 LAN', 'Wi-Fi'], map)).toEqual([
-      'USB 10/100/1000 LAN'
-    ])
-  })
-
-  it('returns empty when every active service is already ours', () => {
-    const map = { 'Wi-Fi': '192.168.2.1', 'USB 10/100/1000 LAN': 'Empty' }
-    expect(servicesToTakeOver(['Wi-Fi', 'USB 10/100/1000 LAN'], map)).toEqual([])
-  })
-})
-
 describe('mergeLegacyOriginDNS', () => {
   it('adopts the legacy single-service value when the map is empty (upgrade mid-session)', () => {
     const map = mergeLegacyOriginDNS({}, '192.168.2.1', 'USB 10/100/1000 LAN')
@@ -127,5 +100,38 @@ describe('tunDnsTransition', () => {
     expect(tunDnsTransition(true, true)).toBeNull()
     expect(tunDnsTransition(false, false)).toBeNull()
     expect(tunDnsTransition(undefined, false)).toBeNull()
+  })
+})
+
+describe('planTakeOver (reality-based takeover)', () => {
+  const svc = ['USB LAN', 'Wi-Fi']
+
+  it('records origin and sets services never taken over', () => {
+    const plan = planTakeOver(svc, {}, () => 'Empty')
+    expect(plan.toSet).toEqual([
+      { service: 'USB LAN', origin: 'Empty' },
+      { service: 'Wi-Fi', origin: 'Empty' }
+    ])
+    expect(plan.map).toEqual({ 'USB LAN': 'Empty', 'Wi-Fi': 'Empty' })
+  })
+
+  it('skips services already at the public DNS', () => {
+    const map = { 'USB LAN': 'Empty', 'Wi-Fi': 'Empty' }
+    const plan = planTakeOver(svc, map, (s) => (s === 'USB LAN' ? PUBLIC_DNS : 'Empty'))
+    expect(plan.toSet).toEqual([{ service: 'Wi-Fi', origin: 'Empty' }])
+    expect(plan.map).toEqual(map)
+  })
+
+  it('heals the stuck state: map covered but actual DNS drifted away', () => {
+    const map = { 'USB LAN': 'Empty', 'Wi-Fi': 'Empty' }
+    const plan = planTakeOver(svc, map, () => 'Empty')
+    expect(plan.toSet.map((t) => t.service)).toEqual(svc)
+    expect(plan.map).toEqual(map)
+  })
+
+  it('never poisons the origin with the public DNS value', () => {
+    const plan = planTakeOver(['NewSvc'], {}, () => PUBLIC_DNS)
+    expect(plan.toSet).toEqual([])
+    expect(plan.map).toEqual({})
   })
 })
