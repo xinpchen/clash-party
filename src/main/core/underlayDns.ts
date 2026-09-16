@@ -142,12 +142,24 @@ let lastProfileUsesSystem = false
 let resolveInflight: Promise<string | null> | null = null
 let refreshInflight: Promise<void> | null = null
 
+// 环境中 scutil 网络事件可能以 ~1Hz 持续触发（既有行为，与 SSID 处理的静默早退共存多年）。
+// 最低重新解析间隔 + 冷却期尾随补查，保证事件风暴下至多每窗口解析一次，
+// 且冷却期内发生的真实网络切换最迟在窗口结束时被补查捕获。
+const MIN_RESOLVE_INTERVAL_MS = 10_000
+let lastResolveAt = 0
+let trailingRefreshTimer: NodeJS.Timeout | null = null
+
+export function noteRuntimeUnderlayState(usesSystem: boolean, appliedDns: string | null): void {
+  lastProfileUsesSystem = usesSystem
+  lastRuntimeUnderlayDns = appliedDns
+}
+
 async function resolveFirstUnderlayDns(): Promise<string | null> {
   const dhcp = await resolveDhcpUnderlayDnsWith(runGetpacket, () =>
     detectUnderlayInterfaceWith(runRouteGetDefault, runNetstatInet)
   )
   if (dhcp) {
-    underlayDnsLogger.info(`DHCP-provided DNS on ${dhcp.interface}: ${dhcp.dns[0]}`)
+    underlayDnsLogger.debug(`DHCP-provided DNS on ${dhcp.interface}: ${dhcp.dns[0]}`)
     return dhcp.dns[0]
   }
 
@@ -185,40 +197,72 @@ export async function getUnderlayDnsForRuntime(): Promise<string[] | null> {
 // factory 在 merge 完成后调用：把最终 runtime 配置里的 "system" 解析为 underlay DNS。
 // 不修改用户持久化配置，只转换提交给核心的 runtime 对象。
 export async function applyUnderlayDnsToProfile(profile: IMihomoConfig): Promise<boolean> {
-  lastProfileUsesSystem =
+  const usesSystem =
     Array.isArray(profile.dns?.['proxy-server-nameserver']) &&
     profile.dns!['proxy-server-nameserver']!.some(
       (entry) => typeof entry === 'string' && entry.trim() === 'system'
     )
-  if (process.platform !== 'darwin' || !lastProfileUsesSystem) return false
+  if (process.platform !== 'darwin' || !usesSystem) {
+    noteRuntimeUnderlayState(usesSystem, null)
+    return false
+  }
 
   const underlay = await getUnderlayDnsForRuntime()
   const replaced = replaceSystemInProxyServerNameserver(profile.dns, underlay)
-  if (replaced && underlay) {
-    lastRuntimeUnderlayDns = underlay[0]
-    underlayDnsLogger.info(
-      `proxy-server-nameserver "system" resolved to underlay DNS: ${underlay[0]}`
-    )
-  } else {
-    lastRuntimeUnderlayDns = null
+  const applied = replaced && underlay ? underlay[0] : null
+  noteRuntimeUnderlayState(true, applied)
+  if (replaced) {
+    underlayDnsLogger.info(`proxy-server-nameserver "system" resolved to underlay DNS: ${applied}`)
   }
   return replaced
+}
+
+export interface UnderlayRefreshDeps {
+  resolveFirst: () => Promise<string | null>
+  hasCore: () => Promise<boolean>
+  reload: () => Promise<void>
+  now: () => number
+}
+
+const defaultRefreshDeps: UnderlayRefreshDeps = {
+  resolveFirst: resolveFirstUnderlayDns,
+  hasCore: async () => (await import('./manager')).hasCoreProcess(),
+  reload: async () => {
+    const { mihomoHotReloadConfig } = await import('./mihomoApi')
+    await mihomoHotReloadConfig()
+  },
+  now: () => Date.now()
 }
 
 // 网络变化（ssid.ts 的 scutil 监听，已 debounce）后刷新 underlay DNS。
 // 仅当解析结果真正变化且 runtime 使用了 "system" 时才触发热重载，避免 reload loop：
 // 本流程从不修改系统 DNS，数据源是 DHCP lease，与应用的 DNS 设置互不影响。
-export function refreshUnderlayDnsOnNetworkChange(): Promise<void> {
+export function refreshUnderlayDnsOnNetworkChange(
+  deps: UnderlayRefreshDeps = defaultRefreshDeps
+): Promise<void> {
   if (refreshInflight) return refreshInflight
 
   refreshInflight = (async (): Promise<void> => {
     if (process.platform !== 'darwin') return
-
-    cachedUnderlayDns = null
-    const next = await getUnderlayDnsForRuntime()
-    const nextFirst = next === null ? null : next[0]
-
+    // 未使用 system 的配置：零开销、零日志
     if (!lastProfileUsesSystem) return
+
+    const elapsed = deps.now() - lastResolveAt
+    if (elapsed < MIN_RESOLVE_INTERVAL_MS) {
+      // 冷却期内跳过解析；安排一次尾随补查，真实网络切换不会丢
+      if (!trailingRefreshTimer) {
+        trailingRefreshTimer = setTimeout(() => {
+          trailingRefreshTimer = null
+          void refreshUnderlayDnsOnNetworkChange(deps)
+        }, MIN_RESOLVE_INTERVAL_MS - elapsed)
+      }
+      return
+    }
+    lastResolveAt = deps.now()
+
+    // 先解析候选值再比较；值未变时只更新缓存，不作废、不打日志、不 reload
+    const nextFirst = await deps.resolveFirst()
+    cachedUnderlayDns = { first: nextFirst }
     if (nextFirst === lastRuntimeUnderlayDns) return
 
     const format = (value: string | null): string => value ?? 'system'
@@ -227,10 +271,8 @@ export function refreshUnderlayDnsOnNetworkChange(): Promise<void> {
     )
     lastRuntimeUnderlayDns = nextFirst
 
-    const { hasCoreProcess } = await import('./manager')
-    if (!hasCoreProcess()) return
-    const { mihomoHotReloadConfig } = await import('./mihomoApi')
-    await mihomoHotReloadConfig()
+    if (!(await deps.hasCore())) return
+    await deps.reload()
   })().finally(() => {
     refreshInflight = null
   })

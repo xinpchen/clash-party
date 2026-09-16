@@ -33,7 +33,9 @@ import {
   parseOriginDnsList,
   replaceSystemInProxyServerNameserver,
   resolveDhcpUnderlayDnsWith,
-  detectUnderlayInterfaceWith
+  detectUnderlayInterfaceWith,
+  refreshUnderlayDnsOnNetworkChange,
+  noteRuntimeUnderlayState
 } from './underlayDns'
 
 describe('parseDhcpDns (ipconfig getpacket DHCP option 6)', () => {
@@ -210,5 +212,84 @@ describe('resolveDhcpUnderlayDnsWith', () => {
       async () => null
     )
     expect(result).toBeNull()
+  })
+})
+
+describe('refreshUnderlayDnsOnNetworkChange throttling & change detection', () => {
+  // 模块级节流状态跨用例存在，各用例时钟基点必须单调递增，否则会被上一个用例节流
+  let clockBase = 1_700_000_000_000
+
+  function makeDeps(resolved: () => string | null) {
+    const startAt = (clockBase += 1_000_000)
+    let clock = startAt
+    const resolveFirst = vi.fn(async () => resolved())
+    const reload = vi.fn(async () => {})
+    const hasCore = vi.fn(async () => true)
+    return {
+      deps: {
+        resolveFirst,
+        reload,
+        hasCore,
+        now: () => clock
+      },
+      resolveFirst,
+      reload,
+      advance: (ms: number) => {
+        clock += ms
+      }
+    }
+  }
+
+  it('does no work at all when the runtime profile does not use "system"', async () => {
+    noteRuntimeUnderlayState(false, null)
+    const { deps, resolveFirst } = makeDeps(() => '192.168.2.1')
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(resolveFirst).not.toHaveBeenCalled()
+  })
+
+  it('resolves once per cooldown window even under a 1Hz event storm', async () => {
+    noteRuntimeUnderlayState(true, '192.168.2.1')
+    const { deps, resolveFirst, advance } = makeDeps(() => '192.168.2.1')
+    for (let i = 0; i < 10; i++) {
+      await refreshUnderlayDnsOnNetworkChange(deps)
+      advance(1000)
+    }
+    expect(resolveFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not reload when the resolved value is unchanged (no reload loop)', async () => {
+    noteRuntimeUnderlayState(true, '192.168.2.1')
+    const { deps, reload } = makeDeps(() => '192.168.2.1')
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('hot reloads once when the underlay DNS actually changes (network switch)', async () => {
+    noteRuntimeUnderlayState(true, '192.168.2.1')
+    let value: string | null = '192.168.2.1'
+    const { deps, reload, advance } = makeDeps(() => value)
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(reload).not.toHaveBeenCalled()
+
+    advance(60_000)
+    value = '192.168.50.1'
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(reload).toHaveBeenCalledTimes(1)
+
+    // 风暴:切换后连续事件,值已稳定,不再重复 reload
+    advance(1000)
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    advance(1000)
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('resolves again after the cooldown window elapses', async () => {
+    noteRuntimeUnderlayState(true, '192.168.2.1')
+    const { deps, resolveFirst, advance } = makeDeps(() => '192.168.2.1')
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    advance(10_001)
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(resolveFirst).toHaveBeenCalledTimes(2)
   })
 })
