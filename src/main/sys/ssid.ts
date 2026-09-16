@@ -4,6 +4,7 @@ import { ipcMain, net } from 'electron'
 import { getAppConfig, patchAppConfig, patchControledMihomoConfig } from '../config'
 import { changeCurrentProfile, getProfileConfig } from '../config/profile'
 import { patchMihomoConfig } from '../core/mihomoApi'
+import { refreshUnderlayDnsOnNetworkChange } from '../core/underlayDns'
 import { mainWindow } from '../window'
 import { getDefaultDevice } from '../core/manager'
 import { updateTrayIcon } from '../resolve/tray'
@@ -126,6 +127,12 @@ async function handleSSIDChange(): Promise<void> {
   }
 }
 
+// 网络变化统一入口：SSID 相关处理 + underlay DNS 刷新（各自内部再做变化检测）
+function runNetworkChangeHandlers(): void {
+  handleSSIDChange()
+  void refreshUnderlayDnsOnNetworkChange()
+}
+
 function startDarwinNetworkWatcher(): void {
   stopNetworkWatcher()
 
@@ -147,7 +154,7 @@ function startDarwinNetworkWatcher(): void {
     networkWatcher.on('exit', () => {
       if (watcherDebounce) clearTimeout(watcherDebounce)
       watcherDebounce = setTimeout(() => {
-        handleSSIDChange()
+        runNetworkChangeHandlers()
       }, 500)
       runWatcher()
     })
@@ -155,7 +162,7 @@ function startDarwinNetworkWatcher(): void {
     networkWatcher.on('error', (err) => {
       ssidLogger.warn('scutil watcher error, falling back to polling', err)
       stopNetworkWatcher()
-      ssidCheckInterval = setInterval(handleSSIDChange, 15000)
+      ssidCheckInterval = setInterval(runNetworkChangeHandlers, 15000)
     })
   }
 

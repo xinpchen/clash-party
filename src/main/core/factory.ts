@@ -26,6 +26,7 @@ import { createLogger } from '../utils/logger'
 import { decryptAgeContent } from '../utils/age'
 import { DEFAULT_CONTROL_DNS, DEFAULT_CONTROL_SNIFF } from '../../shared/appConfig'
 import { atomicWriteFile } from '../utils/safeFile'
+import { applyUnderlayDnsToProfile } from './underlayDns'
 
 const factoryLogger = createLogger('Factory')
 const SMART_OVERRIDE_ID = 'smart-core-override'
@@ -170,6 +171,9 @@ export async function generateProfile(
   if (!controlDns && profile.tun && !profile.dns?.enable) {
     profile.tun = { ...profile.tun, 'dns-hijack': [] }
   }
+  // darwin：把 dns.proxy-server-nameserver 的 "system" 解析为 DHCP underlay DNS。
+  // 只转换提交给核心的 runtime 对象，用户持久化配置保持 "system" 不变。
+  await applyUnderlayDnsToProfile(profile)
   // Smart Override JS 早于受控 TUN 配置合并执行；最终配置写出前再排除代理服务器 IP。
   const addedProxyServerRouteExcludes = ensureSmartProxyServerTunExclude(
     profile,
