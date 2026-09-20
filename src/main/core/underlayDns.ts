@@ -88,20 +88,27 @@ export function replaceSystemInProxyServerNameserver(
 
 export async function detectUnderlayInterfaceWith(
   runRouteGetDefault: () => Promise<string>,
-  runNetstat: () => Promise<string>
+  runNetstat: () => Promise<string>,
+  isAlive: (iface: string) => boolean | Promise<boolean> = () => true
 ): Promise<string | null> {
+  // 候选必须通过存在性验证：双网卡拔线后 route/monitor 可能残留旧接口，
+  // 绑定到已消失的设备会让检测结果不可用。
   // 首选默认路由接口；TUN 未接管时 route get default 直接给出物理口。
   try {
     const routeOut = await runRouteGetDefault()
     const iface = routeOut.match(/interface:\s*(\S+)/)?.[1] ?? ''
-    if (iface && !isVirtualNetworkInterface(iface)) return iface
+    if (iface && !isVirtualNetworkInterface(iface) && (await isAlive(iface))) return iface
   } catch {
     // fall through to netstat
   }
-  // TUN 接管默认路由（得到 utun）时，从完整路由表里找非虚拟的 default 接口。
+  // TUN 接管默认路由（得到 utun）时，从完整路由表里按序找存活的物理接口。
   try {
     const netstatOut = await runNetstat()
-    return parseNetstatDefaultInterfaces(netstatOut)[0] ?? null
+    const candidates = parseNetstatDefaultInterfaces(netstatOut)
+    for (const candidate of candidates) {
+      if (await isAlive(candidate)) return candidate
+    }
+    return null
   } catch {
     return null
   }
@@ -130,12 +137,23 @@ const runNetstatInet = async (): Promise<string> =>
   (await execFilePromise('netstat', ['-rn', '-f', 'inet'])).stdout
 const runGetpacket = async (iface: string): Promise<string> =>
   (await execFilePromise('/usr/sbin/ipconfig', ['getpacket', iface])).stdout
+// 接口存活：有 IPv4 地址（拔线后 getifaddr 失败）
+const isInterfaceAlive = async (iface: string): Promise<boolean> => {
+  try {
+    const { stdout } = await execFilePromise('/usr/sbin/ipconfig', ['getifaddr', iface])
+    return stdout.trim().length > 0
+  } catch {
+    return false
+  }
+}
 
 // ---------- runtime 组合：缓存 + fallback 链 + 网络变化刷新 ----------
 
 // DHCP Option 6 → pre-TUN originDNS → null（保留 system）
 // 解析结果缓存到下次网络变化，避免每次配置生成都执行子进程。
 let cachedUnderlayDns: { first: string | null } | null = null
+// 上次解析使用的 underlay 接口，用于死亡检测
+let lastUnderlayInterface: string | null = null
 // 上一次写入 runtime config 的值与"是否使用了 system"，用于变化检测。
 let lastRuntimeUnderlayDns: string | null = null
 let lastProfileUsesSystem = false
@@ -156,9 +174,11 @@ export function noteRuntimeUnderlayState(usesSystem: boolean, appliedDns: string
 
 async function resolveFirstUnderlayDns(): Promise<string | null> {
   const dhcp = await resolveDhcpUnderlayDnsWith(runGetpacket, () =>
-    detectUnderlayInterfaceWith(runRouteGetDefault, runNetstatInet)
+    detectUnderlayInterfaceWith(runRouteGetDefault, runNetstatInet, isInterfaceAlive)
   )
+  lastUnderlayInterface = dhcp?.interface ?? lastUnderlayInterface
   if (dhcp) {
+    lastUnderlayInterface = dhcp.interface
     underlayDnsLogger.debug(`DHCP-provided DNS on ${dhcp.interface}: ${dhcp.dns[0]}`)
     return dhcp.dns[0]
   }
@@ -222,6 +242,8 @@ export interface UnderlayRefreshDeps {
   hasCore: () => Promise<boolean>
   reload: () => Promise<void>
   now: () => number
+  isAlive?: (iface: string) => boolean | Promise<boolean>
+  lastInterface: () => string | null
 }
 
 const defaultRefreshDeps: UnderlayRefreshDeps = {
@@ -231,7 +253,9 @@ const defaultRefreshDeps: UnderlayRefreshDeps = {
     const { mihomoHotReloadConfig } = await import('./mihomoApi')
     await mihomoHotReloadConfig()
   },
-  now: () => Date.now()
+  now: () => Date.now(),
+  isAlive: isInterfaceAlive,
+  lastInterface: () => lastUnderlayInterface
 }
 
 // 网络变化（ssid.ts 的 scutil 监听，已 debounce）后刷新 underlay DNS。
@@ -246,6 +270,26 @@ export function refreshUnderlayDnsOnNetworkChange(
     if (process.platform !== 'darwin') return
     // 未使用 system 的配置：零开销、零日志
     if (!lastProfileUsesSystem) return
+
+    // 缓存的 underlay 接口已消失（拔线/断网切换）：立即绕过冷却重新解析，
+    // 并且无论 DNS 值是否变化都热重载一次，让 mihomo 的 InterfaceMonitor
+    // 重建（其对链路移除事件可能失灵，实测会停留在已拔出的接口上）。
+    const cachedIface = deps.lastInterface()
+    if (cachedIface && deps.isAlive && !(await deps.isAlive(cachedIface))) {
+      underlayDnsLogger.warn(`Underlay interface ${cachedIface} is gone, re-detecting`)
+      lastResolveAt = deps.now()
+      cachedUnderlayDns = null
+      const nextFirst = await deps.resolveFirst()
+      const candidate = nextFirst === null ? null : nextFirst[0]
+      if (candidate !== lastRuntimeUnderlayDns) {
+        lastRuntimeUnderlayDns = candidate
+        underlayDnsLogger.info(
+          `Underlay DNS changed: ${lastRuntimeUnderlayDns ?? 'system'} -> ${candidate ?? 'system'}`
+        )
+      }
+      if (await deps.hasCore()) await deps.reload()
+      return
+    }
 
     const elapsed = deps.now() - lastResolveAt
     if (elapsed < MIN_RESOLVE_INTERVAL_MS) {

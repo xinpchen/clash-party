@@ -9,7 +9,7 @@ vi.mock('../utils/logger', () => ({
   })
 }))
 
-vi.mock('../config', () => ({
+vi.mock('../config/app', () => ({
   getAppConfig: vi.fn(async () => ({}) as never)
 }))
 
@@ -164,12 +164,15 @@ describe('replaceSystemInProxyServerNameserver', () => {
 })
 
 describe('detectUnderlayInterfaceWith', () => {
+  const alive = (): boolean => true
+
   it('uses the default-route interface when it is physical (Test 1/2)', async () => {
     const routeOut =
       '   route to: default\ndestination: default\n    gateway: 192.168.2.1\n  interface: en7\n      flags: <UP,GATEWAY,DONE>'
     const iface = await detectUnderlayInterfaceWith(
       async () => routeOut,
-      async () => ''
+      async () => '',
+      alive
     )
     expect(iface).toBe('en7')
   })
@@ -178,7 +181,8 @@ describe('detectUnderlayInterfaceWith', () => {
     const netstat = 'default  192.168.2.1  UGScg  en7\ndefault  10.5.0.1  UGScIg  utun3'
     const iface = await detectUnderlayInterfaceWith(
       async () => 'utun3',
-      async () => netstat
+      async () => netstat,
+      alive
     )
     expect(iface).toBe('en7')
   })
@@ -188,7 +192,37 @@ describe('detectUnderlayInterfaceWith', () => {
       async () => {
         throw new Error('no route')
       },
-      async () => 'default 10.5.0.1 UGScg utun4'
+      async () => 'default 10.5.0.1 UGScg utun4',
+      alive
+    )
+    expect(iface).toBeNull()
+  })
+
+  it('skips a dead default-route interface (unplugged, stale monitor state)', async () => {
+    const routeOut =
+      '   route to: default\ndestination: default\n    gateway: 192.168.2.1\n  interface: en7'
+    const netstat = 'default  192.168.2.1  UGScg  en0\ndefault  192.168.2.1  UGScIg  en7'
+    let en7Alive = true
+    const isAlive = (iface: string): boolean => (iface === 'en7' ? en7Alive : true)
+    const detect = (): Promise<string | null> =>
+      detectUnderlayInterfaceWith(
+        async () => routeOut,
+        async () => netstat,
+        isAlive
+      )
+
+    expect(await detect()).toBe('en7')
+    en7Alive = false
+    expect(await detect()).toBe('en0')
+  })
+
+  it('returns null when the only candidate is dead', async () => {
+    const routeOut =
+      '   route to: default\ndestination: default\n    gateway: 192.168.2.1\n  interface: en7'
+    const iface = await detectUnderlayInterfaceWith(
+      async () => routeOut,
+      async () => 'default 192.168.2.1 UGScg en7',
+      () => false
     )
     expect(iface).toBeNull()
   })
@@ -230,7 +264,9 @@ describe('refreshUnderlayDnsOnNetworkChange throttling & change detection', () =
         resolveFirst,
         reload,
         hasCore,
-        now: () => clock
+        now: () => clock,
+        isAlive: vi.fn(async () => true),
+        lastInterface: () => null
       },
       resolveFirst,
       reload,
@@ -282,6 +318,45 @@ describe('refreshUnderlayDnsOnNetworkChange throttling & change detection', () =
     advance(1000)
     await refreshUnderlayDnsOnNetworkChange(deps)
     expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('bypasses cooldown and reloads once when the cached interface dies, then stabilizes', async () => {
+    noteRuntimeUnderlayState(true, '192.168.2.1')
+    const startAt = (clockBase += 1_000_000)
+    let clock = startAt
+    let en7Alive = true
+    let value = '192.168.2.1'
+    const resolveFirst = vi.fn(async () => value)
+    const reload = vi.fn(async () => {})
+    const deps = {
+      resolveFirst,
+      reload,
+      hasCore: vi.fn(async () => true),
+      now: () => clock,
+      isAlive: vi.fn(async (iface: string) => (iface === 'en7' ? en7Alive : true)),
+      lastInterface: () => 'en7'
+    }
+
+    // en7 已死亡 → 绕过冷却立即重解析 + reload(mihomo monitor 重建)
+    en7Alive = false
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(resolveFirst).toHaveBeenCalledTimes(1)
+    expect(reload).toHaveBeenCalledTimes(1)
+
+    // 风暴:lastInterface 仍指向已死的 en7(接口已切,模拟外部状态未同步)
+    // → 仍绕过冷却,但值未变,只 reload 不改 DNS 状态
+    clock += 1000
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(resolveFirst).toHaveBeenCalledTimes(2)
+    expect(reload).toHaveBeenCalledTimes(2)
+
+    // 接口恢复存活(lastInterface 语义上已指向新接口,由 resolveFirst 内部更新)
+    // → 冷却期内常规路径,trailing 补查,不 reload
+    en7Alive = true
+    clock += 1000
+    await refreshUnderlayDnsOnNetworkChange(deps)
+    expect(resolveFirst).toHaveBeenCalledTimes(2)
+    expect(reload).toHaveBeenCalledTimes(2)
   })
 
   it('resolves again after the cooldown window elapses', async () => {
