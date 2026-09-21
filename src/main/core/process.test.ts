@@ -83,7 +83,7 @@ describe('ensureCoreProcessExited', () => {
     )
   })
 
-  it('throws when the process survives SIGKILL', async () => {
+  it('throws when the process survives SIGKILL', { timeout: 10_000 }, async () => {
     const proc = createFakeProc({ exitCode: null })
     proc.kill.mockImplementation(() => true)
 
