@@ -6,6 +6,7 @@ import { app, powerMonitor } from 'electron'
 import { stopCoreForExit, cleanupCoreWatcher } from './core/manager'
 import { primeAdminPrivilegesCache } from './core/admin'
 import { triggerSysProxy, disableSysProxySync } from './sys/sysproxy'
+import { closeTrafficUsage } from './traffic/recorder'
 import { exePath } from './utils/dirs'
 import { saveMainWindowState } from './window'
 
@@ -109,7 +110,7 @@ export function setupAppLifecycle(): void {
         sysProxyDisabled = true
       }
 
-      const cleanupTasks: Promise<unknown>[] = [stopCoreForExit()]
+      const cleanupTasks: Promise<unknown>[] = [stopCoreForExit(), closeTrafficUsage()]
       if (process.platform === 'darwin') {
         cleanupTasks.push(
           triggerSysProxy(false, { helperTimeout: 750, force: true }).then(() => {
@@ -118,9 +119,15 @@ export function setupAppLifecycle(): void {
         )
       }
 
+      // Give core teardown enough headroom to actually kill the child. On
+      // macOS releasing utun inside the kernel routinely takes 1-2s, and
+      // stopCoreForExit now waits for the core to exit (SIGINT then SIGKILL
+      // after coreShutdownTimeout=3s) before returning. A 1.2s window here
+      // would race that path and leave orphan mihomo processes behind, which
+      // is the root cause of the "multiple cores" symptom on macOS.
       await withTimeout(
         Promise.allSettled(cleanupTasks).then(() => {}),
-        1200
+        5000
       )
     })()
 
@@ -150,6 +157,10 @@ export function setupAppLifecycle(): void {
     await cleanupBeforeExit()
     app.exit()
   })
+
+  // 唤醒后的恢复统一由 sys/resume.ts 的 initResumeRecovery() 处理：等网络回来后
+  // 按实际故障分别处置（内核失联则重启、TUN 网卡消失则重建、其余情况热重载配置），
+  // 并重新下发系统代理。此处不再单独注册监听器，否则多个 resume 处理器会互相叠加。
 
   app.on('will-quit', () => {
     if (!sysProxyDisabled) {

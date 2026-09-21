@@ -102,7 +102,6 @@ const Mihomo: React.FC = () => {
     enableSmartOverride = true,
     smartCoreUseLightGBM = false,
     smartCoreCollectData = false,
-    smartCoreStrategy = 'sticky-sessions',
     smartCollectorSize = 100,
     maxLogDays = 7,
     maxLogFileSize = 10,
@@ -141,6 +140,9 @@ const Mihomo: React.FC = () => {
     port: httpPort = DEFAULT_MIHOMO_PORTS.http,
     'redir-port': redirPort = DEFAULT_MIHOMO_PORTS.redir,
     'tproxy-port': tproxyPort = DEFAULT_MIHOMO_PORTS.tproxy,
+    'lgbm-auto-update': lgbmAutoUpdate = false,
+    'lgbm-update-interval': lgbmUpdateInterval = 72,
+    'lgbm-url': lgbmUrl = '',
     profile = {}
   } = controledMihomoConfig || {}
   const { 'store-selected': storeSelected, 'store-fake-ip': storeFakeIp } = profile
@@ -165,6 +167,7 @@ const Mihomo: React.FC = () => {
   const [lanDisallowedIpsInput, setLanDisallowedIpsInput] = useState(lanDisallowedIps)
   const [authenticationInput, setAuthenticationInput] = useState(authentication)
   const [skipAuthPrefixesInput, setSkipAuthPrefixesInput] = useState(skipAuthPrefixes)
+  const [lgbmUrlInput, setLgbmUrlInput] = useState(lgbmUrl)
   const [upgrading, setUpgrading] = useState(false)
   const [lanOpen, setLanOpen] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
@@ -556,7 +559,6 @@ const Mihomo: React.FC = () => {
                       </Tooltip>
                     </div>
                   }
-                  divider
                 >
                   <div className="flex items-center gap-2">
                     <Input
@@ -582,29 +584,76 @@ const Mihomo: React.FC = () => {
                   </div>
                 </SettingItem>
 
-                <SettingItem title={t('mihomo.smartCoreStrategy')}>
-                  <Select
-                    classNames={{
-                      trigger: 'data-[hover=true]:bg-blue-100 dark:data-[hover=true]:bg-blue-900/50'
-                    }}
-                    className="w-37.5"
+                <SettingItem
+                  title={
+                    <div className="flex items-center gap-2">
+                      <span>{t('mihomo.smartLgbmAutoUpdate')}</span>
+                      <Tooltip
+                        content={t('mihomo.smartLgbmAutoUpdateTooltip')}
+                        placement="top"
+                        className="max-w-xs"
+                      >
+                        <IoMdInformationCircleOutline className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-help" />
+                      </Tooltip>
+                    </div>
+                  }
+                  divider
+                >
+                  <Switch
                     size="sm"
-                    aria-label={t('mihomo.smartCoreStrategy')}
-                    selectedKeys={new Set([smartCoreStrategy])}
-                    disallowEmptySelection={true}
-                    onSelectionChange={async (v) => {
-                      const strategy = v.currentKey as 'sticky-sessions' | 'round-robin'
-                      await patchAppConfig({ smartCoreStrategy: strategy })
-                      await mihomoHotReloadConfig()
+                    color="primary"
+                    isSelected={lgbmAutoUpdate}
+                    onValueChange={(v) => {
+                      patchControledMihomoConfig({ 'lgbm-auto-update': v })
                     }}
-                  >
-                    <SelectItem key="sticky-sessions">
-                      {t('mihomo.smartCoreStrategyStickySession')}
-                    </SelectItem>
-                    <SelectItem key="round-robin">
-                      {t('mihomo.smartCoreStrategyRoundRobin')}
-                    </SelectItem>
-                  </Select>
+                  />
+                </SettingItem>
+
+                {lgbmAutoUpdate && (
+                  <SettingItem title={t('mihomo.smartLgbmUpdateInterval')} divider>
+                    <Input
+                      size="sm"
+                      className="w-25"
+                      type="number"
+                      value={lgbmUpdateInterval.toString()}
+                      onValueChange={(v) => {
+                        const num = parseInt(v)
+                        if (Number.isNaN(num)) return
+                        patchControledMihomoConfig({ 'lgbm-update-interval': num })
+                      }}
+                    />
+                  </SettingItem>
+                )}
+
+                <SettingItem
+                  title={
+                    <div className="flex items-center gap-2">
+                      <span>{t('mihomo.smartLgbmUrl')}</span>
+                      <Tooltip
+                        content={t('mihomo.smartLgbmUrlTooltip')}
+                        placement="top"
+                        className="max-w-xs"
+                      >
+                        <IoMdInformationCircleOutline className="text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 cursor-help" />
+                      </Tooltip>
+                    </div>
+                  }
+                >
+                  <div className="flex w-[60%]">
+                    {lgbmUrlInput !== lgbmUrl && (
+                      <Button
+                        size="sm"
+                        color="primary"
+                        className="mr-2"
+                        onPress={() => {
+                          patchControledMihomoConfig({ 'lgbm-url': lgbmUrlInput })
+                        }}
+                      >
+                        {t('common.confirm')}
+                      </Button>
+                    )}
+                    <Input size="sm" value={lgbmUrlInput} onValueChange={setLgbmUrlInput} />
+                  </div>
                 </SettingItem>
               </>
             )}

@@ -21,6 +21,7 @@ const legacyExternal = ['sysproxy-rs', 'electron', 'utf-8-validate', 'bufferutil
 
 export default defineConfig({
   main: {
+    define: { __LEGACY_BUILD__: JSON.stringify(isLegacyBuild) },
     plugins: isLegacyBuild ? [] : [externalizeDepsPlugin()],
     build: isLegacyBuild
       ? { rollupOptions: { external: legacyExternal, output: { format: 'cjs' } } }
@@ -39,6 +40,7 @@ export default defineConfig({
     }
   },
   renderer: {
+    define: { __LEGACY_BUILD__: JSON.stringify(isLegacyBuild) },
     build: {
       rollupOptions: {
         input: {

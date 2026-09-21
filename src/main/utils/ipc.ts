@@ -91,6 +91,8 @@ import {
   setupFirewall
 } from '../sys/misc'
 import { getRuntimeConfig, getRuntimeConfigStr } from '../core/factory'
+import { setControlDns, takeDnsOverrideAutoDisabledNotice } from '../core/dnsOverrideGuard'
+import { getSmartModelStatus, downloadSmartModel } from '../core/smartModel'
 import {
   listWebdavBackups,
   webdavBackup,
@@ -104,6 +106,7 @@ import { getInterfaces } from '../sys/interface'
 import {
   closeTrayIcon,
   copyEnv,
+  getTrayTrafficStyle,
   showTrayIcon,
   updateTrayIcon,
   updateTrayIconImmediate
@@ -132,6 +135,12 @@ import {
   patchPluginItem
 } from '../resolve/plugin'
 import { getPluginConfig } from '../config/plugin'
+import {
+  clearTrafficUsage,
+  importTrafficUsage,
+  queryTrafficUsageBreakdown,
+  queryTrafficUsageOverview
+} from '../traffic/database'
 import { getImageDataURL } from './image'
 import { get as httpGet } from './chromeRequest'
 import { getIconDataURL } from './icon'
@@ -236,6 +245,10 @@ const asyncHandlers: Record<string, AsyncFn> = {
   mihomoCloseAllConnections,
   mihomoRules,
   mihomoRulesDisable,
+  queryTrafficUsageOverview,
+  queryTrafficUsageBreakdown,
+  importTrafficUsage,
+  clearTrafficUsage,
   mihomoProxies,
   mihomoGroups,
   mihomoProxyProviders,
@@ -261,6 +274,8 @@ const asyncHandlers: Record<string, AsyncFn> = {
   patchAppConfig,
   getControledMihomoConfig,
   patchControledMihomoConfig,
+  setControlDns,
+  takeDnsOverrideAutoDisabledNotice,
   // Profile
   getProfileConfig,
   setProfileConfig,
@@ -295,6 +310,8 @@ const asyncHandlers: Record<string, AsyncFn> = {
   readTextFile,
   // Core
   restartCore,
+  getSmartModelStatus,
+  downloadSmartModel,
   mihomoHotReloadConfig,
   startMonitor,
   quitWithoutCore,
@@ -347,6 +364,7 @@ const asyncHandlers: Record<string, AsyncFn> = {
   showTrayIcon,
   closeTrayIcon,
   updateTrayIcon,
+  getTrayTrafficStyle,
   // Floating Window
   showFloatingWindow,
   closeFloatingWindow,

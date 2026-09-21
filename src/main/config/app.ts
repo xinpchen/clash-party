@@ -13,6 +13,17 @@ import { setAppLogDisabled } from '../utils/logger'
 
 let appConfig: IAppConfig // config.yaml
 const appConfigWriteQueue = new WriteQueue()
+const appConfigListeners = new Set<(config: IAppConfig) => void>()
+
+function notifyAppConfigListeners(): void {
+  for (const listener of appConfigListeners) listener(appConfig)
+}
+
+export function subscribeAppConfig(listener: (config: IAppConfig) => void): () => void {
+  appConfigListeners.add(listener)
+  if (appConfig) listener(appConfig)
+  return () => appConfigListeners.delete(listener)
+}
 
 function cloneDefaultConfig(): IAppConfig {
   return JSON.parse(JSON.stringify(defaultConfig)) as IAppConfig
@@ -32,13 +43,25 @@ export async function getAppConfig(force = false): Promise<IAppConfig> {
       setCoreLogDisabled(mergedConfig.disableCoreLog === true)
       setAppLogDisabled(mergedConfig.disableAppLog === true)
       appConfig = mergedConfig
+      notifyAppConfigListeners()
     })
   }
   if (typeof appConfig !== 'object') appConfig = cloneDefaultConfig()
   return appConfig
 }
 
-export async function patchAppConfig(patch: Partial<IAppConfig>): Promise<void> {
+function commitAppConfig(nextConfig: IAppConfig): void {
+  appConfig = nextConfig
+  setGlobalMaxLogFileSizeMB(nextConfig.maxLogFileSize)
+  setCoreLogDisabled(nextConfig.disableCoreLog === true)
+  setAppLogDisabled(nextConfig.disableAppLog === true)
+  notifyAppConfigListeners()
+}
+
+async function writeAppConfig(
+  patch: Partial<IAppConfig>,
+  commitOnWriteError: boolean
+): Promise<void> {
   await appConfigWriteQueue.run(async () => {
     const replaceNameserverPolicy = Object.prototype.hasOwnProperty.call(patch, 'nameserverPolicy')
     const nextConfig = deepMerge(
@@ -49,10 +72,21 @@ export async function patchAppConfig(patch: Partial<IAppConfig>): Promise<void> 
       nextConfig.nameserverPolicy = patch.nameserverPolicy ?? {}
     }
     nextConfig.maxLogFileSize = normalizeMaxLogFileSizeMB(nextConfig.maxLogFileSize)
-    await atomicWriteFile(appConfigPath(), stringify(nextConfig))
-    appConfig = nextConfig
-    setGlobalMaxLogFileSizeMB(nextConfig.maxLogFileSize)
-    setCoreLogDisabled(nextConfig.disableCoreLog === true)
-    setAppLogDisabled(nextConfig.disableAppLog === true)
+    try {
+      await atomicWriteFile(appConfigPath(), stringify(nextConfig))
+    } catch (error) {
+      if (commitOnWriteError) commitAppConfig(nextConfig)
+      throw error
+    }
+    commitAppConfig(nextConfig)
   })
+}
+
+export async function patchAppConfig(patch: Partial<IAppConfig>): Promise<void> {
+  await writeAppConfig(patch, false)
+}
+
+// 内核应用后同步：落盘失败仍更新内存，并抛错供调用方记录。
+export async function syncAppConfigAfterApply(patch: Partial<IAppConfig>): Promise<void> {
+  await writeAppConfig(patch, true)
 }

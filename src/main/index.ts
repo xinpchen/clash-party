@@ -6,7 +6,7 @@ import i18next from 'i18next'
 import { initI18n } from '../shared/i18n'
 import { APP_ID } from '../shared/appConfig'
 import { registerIpcMainHandlers } from './utils/ipc'
-import { getAppConfig, patchAppConfig } from './config'
+import { getAppConfig, patchAppConfig, subscribeAppConfig } from './config'
 import {
   beginCoreInitialization,
   completeCoreInitialization,
@@ -43,6 +43,7 @@ import {
   getSystemLanguage
 } from './lifecycle'
 import { configureAppPaths } from './utils/dirs'
+import { setTrafficUsageEnabled } from './traffic/recorder'
 
 async function getWindowsPowerShellMajorVersion(): Promise<number | null> {
   // 仅 PS 3.0+ 写入 \3\ 键（\1\ 键恒为 2.0，不可用）。
@@ -88,6 +89,7 @@ async function ensureSupportedWindowsPowerShell(): Promise<boolean> {
 }
 
 configureAppPaths()
+subscribeAppConfig((config) => setTrafficUsageEnabled(config.enableTrafficLogger === true))
 
 const mainLogger = createLogger('Main')
 

@@ -7,10 +7,10 @@ import {
   getSubStatsByHost,
   getDevicesByHost,
   getProxyStatsByHost,
+  clearTrafficUsageData,
   type AggregatedData,
   type DataUsageType
 } from '@renderer/utils/dataUsage'
-import { db } from '@renderer/utils/db'
 import { Button, Tab, Tabs } from '@heroui/react'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -65,24 +65,14 @@ const TrafficPage: React.FC = () => {
       isCancelled: () => boolean = () => false
     ) => {
       const { start, end, bucketSizeMs: bms } = getTimeRange(timeRange)
-      const { rankings: agg, trend } = await getTrafficOverview(activeView, start, end, bms)
+      const { rankings: agg, trend, totals } = await getTrafficOverview(activeView, start, end, bms)
 
       if (isCancelled() || generation !== loadGenerationRef.current) return
 
       setBucketSizeMs(bms)
       setRankings(agg)
       setTrendData(trend)
-      setTotalStats(
-        agg.reduce(
-          (acc, r) => ({
-            upload: acc.upload + r.upload,
-            download: acc.download + r.download,
-            total: acc.total + r.total,
-            count: acc.count + r.count
-          }),
-          { upload: 0, download: 0, total: 0, count: 0 }
-        )
-      )
+      setTotalStats(totals)
 
       if (resetSelection) {
         setSelectedRow(null)
@@ -98,22 +88,43 @@ const TrafficPage: React.FC = () => {
     const generation = ++loadGenerationRef.current
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
+    let refreshing = false
+    let resetSelection = true
 
-    const refresh = async (resetSelection: boolean): Promise<void> => {
-      await load(resetSelection, generation, () => cancelled)
-      if (cancelled || generation !== loadGenerationRef.current) return
+    const clearRefreshTimer = (): void => {
+      if (refreshTimer === null) return
+      clearTimeout(refreshTimer)
+      refreshTimer = null
+    }
+
+    const refresh = async (): Promise<void> => {
+      if (cancelled || document.hidden || refreshing) return
+      refreshing = true
+      try {
+        await load(resetSelection, generation, () => cancelled || document.hidden)
+      } finally {
+        refreshing = false
+      }
+      if (cancelled || document.hidden || generation !== loadGenerationRef.current) return
+      resetSelection = false
       refreshTimer = setTimeout(() => {
-        void refresh(false)
+        refreshTimer = null
+        void refresh()
       }, AUTO_REFRESH_INTERVAL_MS)
     }
 
-    void refresh(true)
+    const handleVisibilityChange = (): void => {
+      if (document.hidden) clearRefreshTimer()
+      else void refresh()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    void refresh()
 
     return () => {
       cancelled = true
-      if (refreshTimer !== null) {
-        clearTimeout(refreshTimer)
-      }
+      clearRefreshTimer()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [load])
 
@@ -175,7 +186,7 @@ const TrafficPage: React.FC = () => {
   )
 
   const handleClearAll = useCallback(async () => {
-    await db.clearAll()
+    await clearTrafficUsageData()
     await load()
   }, [load])
 

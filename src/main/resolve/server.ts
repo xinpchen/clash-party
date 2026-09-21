@@ -103,7 +103,7 @@ export async function startSubStoreFrontendServer(): Promise<void> {
   const frontendDir = path.join(mihomoWorkDir(), 'sub-store-frontend')
   app.use(express.static(frontendDir))
   app.use((_req, res) => {
-    res.sendFile(path.join(frontendDir, 'index.html'))
+    res.sendFile('index.html', { root: frontendDir })
   })
   subStoreFrontendServer = app.listen(subStoreFrontendPort, subStoreHost)
 }

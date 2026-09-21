@@ -27,6 +27,7 @@ import { decryptAgeContent } from '../utils/age'
 import { DEFAULT_CONTROL_DNS, DEFAULT_CONTROL_SNIFF } from '../../shared/appConfig'
 import { atomicWriteFile } from '../utils/safeFile'
 import { applyUnderlayDnsToProfile } from './underlayDns'
+import { evaluateDnsOverrideGuard, type DnsOverrideGuardResult } from './dnsOverrideGuard'
 
 const factoryLogger = createLogger('Factory')
 const SMART_OVERRIDE_ID = 'smart-core-override'
@@ -39,8 +40,22 @@ interface GenerateProfileOptions {
   baseProfile?: IMihomoConfig
   ageSecretKey?: string
   profileOverrideIds?: string[]
+  // 调用方已读取的全局 override id 集合：给出时不再自行读取，生成所用的集合与调用方记录的完全一致
+  //（插件订阅校验用它把"参与校验的集合"绑定到校验本身）
+  globalOverrideIds?: string[]
   outputPath?: string
   updateRuntimeConfig?: boolean
+}
+
+export interface GenerateProfileResult {
+  profileId: string | undefined
+  // 随本次配置成功应用后同步。
+  dnsGuard: DnsOverrideGuardResult
+}
+
+export async function globalOverrideIdsNow(): Promise<string[]> {
+  const { items = [] } = (await getOverrideConfig()) || {}
+  return items.filter((item) => item.global).map((item) => item.id)
 }
 
 // 辅助函数：处理带偏移量的规则
@@ -120,7 +135,7 @@ function ensureSmartProxyServerTunExclude(profile: IMihomoConfig, enabled: boole
 export async function generateProfile(
   pendingControledMihomoConfig?: Partial<IMihomoConfig>,
   options: GenerateProfileOptions = {}
-): Promise<string | undefined> {
+): Promise<GenerateProfileResult> {
   // 第一阶段：并行读取互不依赖的配置（强制重读 profileConfig 完成后再进入第二阶段，保证缓存一致）。
   const [profileConfig, appConfig] = await Promise.all([getProfileConfig(true), getAppConfig()])
   const { current } = profileConfig
@@ -130,11 +145,25 @@ export async function generateProfile(
     await Promise.all([
       getProfileItem(profileId),
       options.baseProfile ?? getProfile(profileId),
-      getOrderedOverrideIds(profileId, options.profileOverrideIds),
+      getOrderedOverrideIds(profileId, options.profileOverrideIds, options.globalOverrideIds),
       getControledMihomoConfig()
     ])
   const ageSecretKey = options.ageSecretKey ?? currentProfileItem?.ageSecretKey ?? ''
   let controledMihomoConfig = pendingControledMihomoConfig ?? fetchedControledMihomoConfig
+  const {
+    diffWorkDir = false,
+    controlDns: controlDnsSetting = DEFAULT_CONTROL_DNS,
+    controlSniff = DEFAULT_CONTROL_SNIFF,
+    useNameserverPolicy
+  } = appConfig
+  // DNS 保护先于覆写和脚本处理，开关在内核应用成功后同步。
+  const dnsGuard = evaluateDnsOverrideGuard(
+    profileId ?? 'default',
+    baseProfile,
+    controlDnsSetting,
+    options.updateRuntimeConfig !== false
+  )
+  const { controlDns } = dnsGuard
   const profileWithNormalOverride = await applyOverrides(
     baseProfile,
     overrideIds.normal,
@@ -147,12 +176,6 @@ export async function generateProfile(
     ageSecretKey
   )
 
-  const {
-    diffWorkDir = false,
-    controlDns = DEFAULT_CONTROL_DNS,
-    controlSniff = DEFAULT_CONTROL_SNIFF,
-    useNameserverPolicy
-  } = appConfig
   // 根据开关状态过滤控制配置
   controledMihomoConfig = { ...controledMihomoConfig }
   if (!controlDns) {
@@ -219,7 +242,7 @@ export async function generateProfile(
     runtimeConfig = profile
     runtimeConfigStr = nextRuntimeConfigStr
   }
-  return profileId
+  return { profileId, dnsGuard }
 }
 
 async function applyRuleOverride(
@@ -319,13 +342,13 @@ async function prepareProfileWorkDir(current: string | undefined): Promise<void>
 
 async function getOrderedOverrideIds(
   current: string | undefined,
-  profileOverrideIds?: string[]
+  profileOverrideIds?: string[],
+  globalOverrideIds?: string[]
 ): Promise<{
   normal: string[]
   smart: string[]
 }> {
-  const { items = [] } = (await getOverrideConfig()) || {}
-  const globalOverride = items.filter((item) => item.global).map((item) => item.id)
+  const globalOverride = globalOverrideIds ?? (await globalOverrideIdsNow())
   const override = profileOverrideIds ?? (await getProfileItem(current))?.override ?? []
   const orderedOverrideIds = [...new Set(globalOverride.concat(override))]
 

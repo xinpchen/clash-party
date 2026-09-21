@@ -381,6 +381,44 @@ jobs:
           npm_config_arch: ${{ matrix.arch }}
           npm_config_target_arch: ${{ matrix.arch }}
         run: pnpm prepare --${{ matrix.arch }}
+      - name: Import Developer ID application certificate
+        shell: bash
+        env:
+          MACOS_CSC_LINK: ${{ secrets.CSC_LINK }}
+          MACOS_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          printf '%s' "$MACOS_CSC_LINK" | base64 --decode > "$certificate"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CSC_KEY_PASSWORD" -A \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$certificate"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$keychain_password" "$keychain" >/dev/null 2>&1 \
+            || echo "::warning::set-key-partition-list was refused; relying on the -A import"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$keychain"
+
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
+          if [ -z "$identity" ]; then
+            echo "No 'Developer ID Application' identity in the imported certificate."
+            security find-identity -v -p codesigning "$keychain" || true
+            exit 1
+          fi
+          echo "Signing identity: $identity"
+          signing_name="${identity#Developer ID Application: }"
+          {
+            echo "CSC_KEYCHAIN=$keychain"
+            echo "CSC_NAME=$signing_name"
+          } >> "$GITHUB_ENV"
       - name: Build
         env:
           npm_config_arch: ${{ matrix.arch }}
@@ -388,8 +426,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
           chmod +x build/pkg-scripts/postinstall build/pkg-scripts/preinstall
           pnpm build:mac --${{ matrix.arch }}
@@ -483,6 +519,44 @@ jobs:
           npm_config_arch: ${{ matrix.arch }}
           npm_config_target_arch: ${{ matrix.arch }}
         run: pnpm prepare --${{ matrix.arch }}
+      - name: Import Developer ID application certificate
+        shell: bash
+        env:
+          MACOS_CSC_LINK: ${{ secrets.CSC_LINK }}
+          MACOS_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          printf '%s' "$MACOS_CSC_LINK" | base64 --decode > "$certificate"
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CSC_KEY_PASSWORD" -A \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$certificate"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$keychain_password" "$keychain" >/dev/null 2>&1 \
+            || echo "::warning::set-key-partition-list was refused; relying on the -A import"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$keychain"
+
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
+          if [ -z "$identity" ]; then
+            echo "No 'Developer ID Application' identity in the imported certificate."
+            security find-identity -v -p codesigning "$keychain" || true
+            exit 1
+          fi
+          echo "Signing identity: $identity"
+          signing_name="${identity#Developer ID Application: }"
+          {
+            echo "CSC_KEYCHAIN=$keychain"
+            echo "CSC_NAME=$signing_name"
+          } >> "$GITHUB_ENV"
       - name: Build
         env:
           npm_config_arch: ${{ matrix.arch }}
@@ -490,8 +564,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
           sed -i "" -e "s/macos/catalina/" electron-builder.yml
           chmod +x build/pkg-scripts/postinstall build/pkg-scripts/preinstall

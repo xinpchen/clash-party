@@ -10,7 +10,6 @@ const SMART_OVERRIDE_ID = 'smart-core-override'
 function generateSmartOverrideTemplate(
   useLightGBM: boolean,
   collectData: boolean,
-  strategy: string,
   collectorSize: number
 ): string {
   return `
@@ -86,12 +85,10 @@ function main(config) {
             }
             group.uselightgbm = ${useLightGBM}
             group.collectdata = ${collectData}
-            group.strategy = '${strategy}'
             
-            // 移除 url-test 和 load-balance 特有的配置
+            // 移除 url-test 和 load-balance 特有的配置（tolerance 是 Smart 也支持的选项，保留）
             if (group.url) delete group.url
             if (group.interval) delete group.interval
-            if (group.tolerance) delete group.tolerance
             if (group.lazy) delete group.lazy
             if (group.expected_status) delete group['expected-status']
           }
@@ -200,7 +197,6 @@ function main(config) {
         }
         group.uselightgbm = ${useLightGBM}
         group.collectdata = ${collectData}
-        group.strategy = '${strategy}'
         break
       }
     }
@@ -221,7 +217,6 @@ function main(config) {
           'policy-priority': '',  // policy-priority: <1 means lower priority, >1 means higher priority, the default is 1, pattern support regex and string
           uselightgbm: ${useLightGBM},
           collectdata: ${collectData},
-          strategy: '${strategy}',
           proxies: proxyNames
         }
         config['proxy-groups'].unshift(smartGroup)
@@ -365,7 +360,6 @@ export async function createSmartOverride(): Promise<void> {
     const {
       smartCoreUseLightGBM = false,
       smartCoreCollectData = false,
-      smartCoreStrategy = 'sticky-sessions',
       smartCollectorSize = 100
     } = await getAppConfig()
 
@@ -373,7 +367,6 @@ export async function createSmartOverride(): Promise<void> {
     const template = generateSmartOverrideTemplate(
       smartCoreUseLightGBM,
       smartCoreCollectData,
-      smartCoreStrategy,
       smartCollectorSize
     )
 

@@ -98,6 +98,10 @@ export function appConfigPath(): string {
   return path.join(dataDir(), 'config.yaml')
 }
 
+export function trafficUsageDatabasePath(): string {
+  return path.join(dataDir(), 'traffic-usage.db')
+}
+
 export function controledMihomoConfigPath(): string {
   return path.join(dataDir(), 'mihomo.yaml')
 }

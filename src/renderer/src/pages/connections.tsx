@@ -449,8 +449,10 @@ const Connections: React.FC = () => {
   ])
 
   useEffect(() => {
-    const handler = (_e: unknown, ...args: unknown[]): void => {
-      const info = args[0] as IMihomoConnectionsInfo
+    let pendingInfo: IMihomoConnectionsInfo | undefined
+    let frameId: number | undefined
+
+    const updateConnections = (info: IMihomoConnectionsInfo): void => {
       setConnectionsInfo(info)
 
       if (!info.connections) return
@@ -487,12 +489,29 @@ const Connections: React.FC = () => {
       cachedConnections = sliced
     }
 
+    const handler = (_e: unknown, ...args: unknown[]): void => {
+      const info = args[0] as IMihomoConnectionsInfo | undefined
+      if (!info || document.hidden) return
+
+      pendingInfo = info
+      if (frameId !== undefined) return
+      frameId = window.requestAnimationFrame(() => {
+        frameId = undefined
+        const latestInfo = pendingInfo
+        pendingInfo = undefined
+        if (latestInfo && !document.hidden) updateConnections(latestInfo)
+      })
+    }
+
+    let unsubscribe: (() => void) | null = null
     if (!isPaused) {
-      window.electron.ipcRenderer.on('mihomoConnections', handler)
+      unsubscribe = window.electron.ipcRenderer.on('mihomoConnections', handler)
     }
 
     return (): void => {
-      window.electron.ipcRenderer.removeListener('mihomoConnections', handler)
+      unsubscribe?.()
+      if (frameId !== undefined) window.cancelAnimationFrame(frameId)
+      pendingInfo = undefined
     }
   }, [isPaused])
 
