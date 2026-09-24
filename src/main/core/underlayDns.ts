@@ -62,25 +62,31 @@ export function parseOriginDnsList(originDNS: string | undefined): string[] {
     .filter((entry) => isValidIpv4Dns(entry) && entry !== '223.5.5.5')
 }
 
-// 仅替换 dns.proxy-server-nameserver 中的字面量 "system" 为 underlay DNS（第一个有效值）。
-// 其他字段、显式 IP、DoH URL 一律不动；underlay 不可用时保留 "system"。
-// 返回是否发生了替换。
-export function replaceSystemInProxyServerNameserver(
+// 需要把字面量 "system" 解析为 underlay DNS 的字段（核心会读取物理网络 DNS 的语义）
+const UNDERLAY_SYSTEM_FIELDS = ['proxy-server-nameserver', 'direct-nameserver'] as const
+
+// 仅替换上述字段中的字面量 "system" 为 underlay DNS（第一个有效值）。
+// 其他字段（nameserver/default-nameserver/nameserver-policy 等）、显式 IP、DoH URL
+// 一律不动；underlay 不可用时保留 "system"。返回是否发生了替换。
+export function replaceSystemWithUnderlayDns(
   dns: IMihomoConfig['dns'],
   underlay: string[] | null
 ): boolean {
-  const list = dns?.['proxy-server-nameserver']
-  if (!dns || !Array.isArray(list) || !underlay || underlay.length === 0) return false
+  if (!dns || !underlay || underlay.length === 0) return false
 
   const replacement = underlay[0]
   let changed = false
-  dns['proxy-server-nameserver'] = list.map((entry) => {
-    if (typeof entry === 'string' && entry.trim() === 'system') {
-      changed = true
-      return replacement
-    }
-    return entry
-  })
+  for (const field of UNDERLAY_SYSTEM_FIELDS) {
+    const list = dns[field]
+    if (!Array.isArray(list)) continue
+    dns[field] = list.map((entry) => {
+      if (typeof entry === 'string' && entry.trim() === 'system') {
+        changed = true
+        return replacement
+      }
+      return entry
+    })
+  }
   return changed
 }
 
@@ -228,7 +234,7 @@ export async function applyUnderlayDnsToProfile(profile: IMihomoConfig): Promise
   }
 
   const underlay = await getUnderlayDnsForRuntime()
-  const replaced = replaceSystemInProxyServerNameserver(profile.dns, underlay)
+  const replaced = replaceSystemWithUnderlayDns(profile.dns, underlay)
   const applied = replaced && underlay ? underlay[0] : null
   noteRuntimeUnderlayState(true, applied)
   if (replaced) {

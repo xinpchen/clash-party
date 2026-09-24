@@ -31,7 +31,7 @@ import {
   parseNetstatDefaultInterfaces,
   isVirtualNetworkInterface,
   parseOriginDnsList,
-  replaceSystemInProxyServerNameserver,
+  replaceSystemWithUnderlayDns,
   resolveDhcpUnderlayDnsWith,
   detectUnderlayInterfaceWith,
   refreshUnderlayDnsOnNetworkChange,
@@ -113,44 +113,55 @@ describe('parseOriginDnsList (pre-TUN saved system DNS)', () => {
   })
 })
 
-describe('replaceSystemInProxyServerNameserver', () => {
+describe('replaceSystemWithUnderlayDns', () => {
   const dns = (): IMihomoConfig['dns'] => ({
     'default-nameserver': ['tls://223.5.5.5'],
     'proxy-server-nameserver': ['system'],
+    'direct-nameserver': ['system'],
     nameserver: ['https://doh.pub/dns-query']
   })
 
   it('replaces system with the first underlay DNS (Test 3)', () => {
     const config = dns()
-    const replaced = replaceSystemInProxyServerNameserver(config, ['192.168.2.1', '192.168.2.2'])
+    const replaced = replaceSystemWithUnderlayDns(config, ['192.168.2.1', '192.168.2.2'])
     expect(replaced).toBe(true)
     expect(config!['proxy-server-nameserver']).toEqual(['192.168.2.1'])
   })
 
+  it('replaces system in direct-nameserver the same way', () => {
+    const config = dns()
+    replaceSystemWithUnderlayDns(config, ['192.168.2.1'])
+    expect(config!['direct-nameserver']).toEqual(['192.168.2.1'])
+  })
+
   it('keeps every other dns field untouched', () => {
     const config = dns()
-    replaceSystemInProxyServerNameserver(config, ['192.168.2.1'])
+    replaceSystemWithUnderlayDns(config, ['192.168.2.1'])
     expect(config!['default-nameserver']).toEqual(['tls://223.5.5.5'])
     expect(config!.nameserver).toEqual(['https://doh.pub/dns-query'])
   })
 
   it('keeps an explicit IP untouched (Test 4)', () => {
-    const config: IMihomoConfig['dns'] = { 'proxy-server-nameserver': ['8.8.8.8'] }
-    expect(replaceSystemInProxyServerNameserver(config, ['192.168.2.1'])).toBe(false)
+    const config: IMihomoConfig['dns'] = {
+      'proxy-server-nameserver': ['8.8.8.8'],
+      'direct-nameserver': ['8.8.8.8']
+    }
+    expect(replaceSystemWithUnderlayDns(config, ['192.168.2.1'])).toBe(false)
     expect(config!['proxy-server-nameserver']).toEqual(['8.8.8.8'])
+    expect(config!['direct-nameserver']).toEqual(['8.8.8.8'])
   })
 
   it('keeps DoH URLs untouched (Test 5)', () => {
     const config: IMihomoConfig['dns'] = {
       'proxy-server-nameserver': ['https://dns.example.com/dns-query']
     }
-    expect(replaceSystemInProxyServerNameserver(config, ['192.168.2.1'])).toBe(false)
+    expect(replaceSystemWithUnderlayDns(config, ['192.168.2.1'])).toBe(false)
     expect(config!['proxy-server-nameserver']).toEqual(['https://dns.example.com/dns-query'])
   })
 
   it('keeps system when no underlay DNS resolved (fallback end of chain)', () => {
     const config = dns()
-    expect(replaceSystemInProxyServerNameserver(config, null)).toBe(false)
+    expect(replaceSystemWithUnderlayDns(config, null)).toBe(false)
     expect(config!['proxy-server-nameserver']).toEqual(['system'])
   })
 
@@ -158,7 +169,7 @@ describe('replaceSystemInProxyServerNameserver', () => {
     const config: IMihomoConfig['dns'] = {
       'proxy-server-nameserver': ['system', '8.8.8.8', 'systemd.local']
     }
-    replaceSystemInProxyServerNameserver(config, ['10.0.0.1'])
+    replaceSystemWithUnderlayDns(config, ['10.0.0.1'])
     expect(config!['proxy-server-nameserver']).toEqual(['10.0.0.1', '8.8.8.8', 'systemd.local'])
   })
 })
