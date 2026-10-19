@@ -8,6 +8,8 @@ import {
   DropdownMenu,
   DropdownTrigger,
   Input,
+  Tab,
+  Tabs,
   Tooltip
 } from '@heroui/react'
 import BasePage from '@renderer/components/base/base-page'
@@ -16,6 +18,7 @@ import ProfileItem from '@renderer/components/profiles/profile-item'
 import PluginItem from '@renderer/components/plugins/plugin-item'
 import PluginInstallModal from '@renderer/components/plugins/plugin-install-modal'
 import EditInfoModal from '@renderer/components/profiles/edit-info-modal'
+import SimpleLocalNodes from '@renderer/components/simple/simple-local-nodes'
 import { useProfileConfig } from '@renderer/hooks/use-profile-config'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { usePluginConfig } from '@renderer/hooks/use-plugin-config'
@@ -60,6 +63,7 @@ const Profiles: React.FC = () => {
     mutateProfileConfig
   } = useProfileConfig()
   const { appConfig } = useAppConfig()
+  const simpleMode = appConfig?.operationMode === 'simple'
   const {
     useSubStore = DEFAULT_USE_SUB_STORE,
     useCustomSubStore = false,
@@ -82,6 +86,8 @@ const Profiles: React.FC = () => {
   const [, setNow] = useState(new Date())
   const { pluginConfig, mutatePluginConfig } = usePluginConfig()
   const [showPluginImport, setShowPluginImport] = useState(false)
+  const [tab, setTab] = useState<'subscriptions' | 'nodes'>('subscriptions')
+  const showSubscriptions = !simpleMode || tab === 'subscriptions'
   const [pluginDropFile, setPluginDropFile] = useState<File | null>(null)
   const [pluginFileData, setPluginFileData] = useState<IPluginFilePayload | null>(null)
   // bump per .cpx drop -> remount modal so it loads the new file even when open
@@ -284,47 +290,49 @@ const Profiles: React.FC = () => {
       ref={pageRef}
       title={t('profiles.title')}
       header={
-        <>
-          <Button
-            size="sm"
-            title={t('plugins.title')}
-            isIconOnly
-            variant="light"
-            className="app-nodrag"
-            onPress={() => {
-              setPluginDropFile(null)
-              setPluginFileData(null)
-              setShowPluginImport(true)
-            }}
-          >
-            <TbPuzzle className="text-lg" />
-          </Button>
-          <Button
-            size="sm"
-            title={t('profiles.updateAll')}
-            className="app-nodrag"
-            variant="light"
-            isIconOnly
-            onPress={async () => {
-              setUpdating(true)
-              for (const item of items) {
-                if (item.id === current) continue
-                if (item.type === 'remote') await addProfileItem(item)
-                else if (item.type === 'plugin' && item.pluginId)
-                  await updatePluginProfile(item.pluginId, true)
-              }
-              const currentItem = items.find((item) => item.id === current)
-              if (currentItem && currentItem.type === 'remote') {
-                await addProfileItem(currentItem)
-              } else if (currentItem?.type === 'plugin' && currentItem.pluginId) {
-                await updatePluginProfile(currentItem.pluginId, true)
-              }
-              setUpdating(false)
-            }}
-          >
-            <IoMdRefresh className={`text-lg ${updating ? 'animate-spin' : ''}`} />
-          </Button>
-        </>
+        showSubscriptions ? (
+          <>
+            <Button
+              size="sm"
+              title={t('plugins.title')}
+              isIconOnly
+              variant="light"
+              className="app-nodrag"
+              onPress={() => {
+                setPluginDropFile(null)
+                setPluginFileData(null)
+                setShowPluginImport(true)
+              }}
+            >
+              <TbPuzzle className="text-lg" />
+            </Button>
+            <Button
+              size="sm"
+              title={t('profiles.updateAll')}
+              className="app-nodrag"
+              variant="light"
+              isIconOnly
+              onPress={async () => {
+                setUpdating(true)
+                for (const item of items) {
+                  if (item.id === current) continue
+                  if (item.type === 'remote') await addProfileItem(item)
+                  else if (item.type === 'plugin' && item.pluginId)
+                    await updatePluginProfile(item.pluginId, true)
+                }
+                const currentItem = items.find((item) => item.id === current)
+                if (currentItem && currentItem.type === 'remote') {
+                  await addProfileItem(currentItem)
+                } else if (currentItem?.type === 'plugin' && currentItem.pluginId) {
+                  await updatePluginProfile(currentItem.pluginId, true)
+                }
+                setUpdating(false)
+              }}
+            >
+              <IoMdRefresh className={`text-lg ${updating ? 'animate-spin' : ''}`} />
+            </Button>
+          </>
+        ) : undefined
       }
     >
       {openInfoImport && (
@@ -342,263 +350,290 @@ const Profiles: React.FC = () => {
           onClose={() => setOpenInfoImport(false)}
         />
       )}
-      <div className="sticky profiles-sticky top-0 z-40 bg-background">
-        <div className="flex flex-col gap-2 p-2">
-          <div className="flex gap-2">
-            <Input
-              size="sm"
-              placeholder={t('profiles.input.placeholder')}
-              value={url}
-              onValueChange={setUrl}
-              onKeyUp={handleInputKeyUp}
-              className="flex-1"
-              endContent={
-                <>
-                  <Button
-                    size="md"
-                    isIconOnly
-                    variant="light"
-                    onPress={() => {
-                      navigator.clipboard.readText().then((text) => {
-                        setUrl(text)
-                      })
-                    }}
-                    className="mr-2"
-                  >
-                    <MdContentPaste className="text-lg" />
-                  </Button>
-                  {/* p-0 m-0 覆盖 HeroUI 默认的 `p-2 -m-2`：负外边距会把点击热区外扩 8px，
-                      正好盖住左边只有 mr-2 间距的粘贴按钮，导致点按钮变成切换代理开关 */}
-                  <Checkbox
-                    className="whitespace-nowrap p-0 m-0"
-                    isSelected={useProxy}
-                    onValueChange={setUseProxy}
-                  >
-                    {t('profiles.useProxy')}
-                  </Checkbox>
-                </>
-              }
-            />
-
-            <Tooltip content={t('profiles.editInfo.authToken')} placement="bottom">
-              <Button
-                size="sm"
-                variant={showAdvanced ? 'solid' : 'light'}
-                isIconOnly
-                onPress={() => setShowAdvanced(!showAdvanced)}
-              >
-                {showAdvanced ? (
-                  <MdUnfoldLess className="text-lg" />
-                ) : (
-                  <MdUnfoldMore className="text-lg" />
-                )}
-              </Button>
-            </Tooltip>
-            <Button
+      {simpleMode && (
+        <div className="overflow-x-auto">
+          <div className="flex gap-2 p-2">
+            <Tabs
               size="sm"
               color="primary"
-              isDisabled={isUrlEmpty}
-              isLoading={importing}
-              onPress={handleImport}
+              variant="underlined"
+              className="h-8 w-fit"
+              selectedKey={tab}
+              onSelectionChange={(key) => setTab(key as 'subscriptions' | 'nodes')}
             >
-              {t('profiles.import')}
-            </Button>
-            {useSubStore && (
-              <Dropdown
-                onOpenChange={() => {
-                  mutateSubs()
-                  mutateCollections()
-                }}
-              >
-                <DropdownTrigger>
-                  <Button
-                    isLoading={subStoreImporting}
-                    title="Sub-Store"
-                    className="substore-import"
-                    size="sm"
-                    isIconOnly
-                    color="primary"
-                  >
-                    <SubStoreIcon className="text-lg" />
-                  </Button>
-                </DropdownTrigger>
-                <DropdownMenu
-                  className="max-h-[calc(100vh-200px)] overflow-y-auto"
-                  onAction={async (key) => {
-                    if (key === 'open-substore') {
-                      navigate('/substore')
-                    } else if (key.toString().startsWith('sub-')) {
-                      setSubStoreImporting(true)
-                      try {
-                        const sub = subs.find(
-                          (sub) => sub.name === key.toString().replace('sub-', '')
-                        )
-                        await addProfileItem({
-                          name: sub?.displayName || sub?.name || '',
-                          substore: !useCustomSubStore,
-                          type: 'remote',
-                          url: useCustomSubStore
-                            ? `${customSubStoreUrl}/download/${key.toString().replace('sub-', '')}?target=ClashMeta`
-                            : `/download/${key.toString().replace('sub-', '')}`,
-                          useProxy
-                        })
-                      } catch (e) {
-                        toast.error(String(e))
-                      } finally {
-                        setSubStoreImporting(false)
-                      }
-                    } else if (key.toString().startsWith('collection-')) {
-                      setSubStoreImporting(true)
-                      try {
-                        const collection = collections.find(
-                          (collection) =>
-                            collection.name === key.toString().replace('collection-', '')
-                        )
-                        await addProfileItem({
-                          name: collection?.displayName || collection?.name || '',
-                          type: 'remote',
-                          substore: !useCustomSubStore,
-                          url: useCustomSubStore
-                            ? `${customSubStoreUrl}/download/collection/${key.toString().replace('collection-', '')}?target=ClashMeta`
-                            : `/download/collection/${key.toString().replace('collection-', '')}`,
-                          useProxy
-                        })
-                      } catch (e) {
-                        toast.error(String(e))
-                      } finally {
-                        setSubStoreImporting(false)
-                      }
-                    }
-                  }}
-                >
-                  {subStoreMenuItems.map((item) => (
-                    <DropdownItem
-                      startContent={item?.icon}
-                      key={item.key}
-                      showDivider={item.divider}
-                    >
-                      {item.children}
-                    </DropdownItem>
-                  ))}
-                </DropdownMenu>
-              </Dropdown>
-            )}
-            <Dropdown>
-              <DropdownTrigger>
-                <Button className="new-profile" size="sm" isIconOnly color="primary">
-                  <FaPlus />
-                </Button>
-              </DropdownTrigger>
-              <DropdownMenu
-                onAction={async (key) => {
-                  if (key === 'open') {
-                    try {
-                      const files = await getFilePath(['yml', 'yaml'])
-                      if (files?.length) {
-                        const content = await readTextFile(files[0])
-                        const fileName = files[0].split('/').pop()?.split('\\').pop()
-                        await addProfileItem({ name: fileName, type: 'local', file: content })
-                      }
-                    } catch (e) {
-                      toast.error(String(e))
-                    }
-                  } else if (key === 'new') {
-                    await addProfileItem({
-                      name: t('profiles.newProfile'),
-                      type: 'local',
-                      file: 'proxies: []\nproxy-groups: []\nrules: []'
-                    })
-                  } else if (key === 'import') {
-                    setOpenInfoImport(true)
-                  }
-                }}
-              >
-                <DropdownItem key="import">{t('profiles.import')}</DropdownItem>
-                <DropdownItem key="open">{t('profiles.open')}</DropdownItem>
-                <DropdownItem key="new">{t('profiles.new')}</DropdownItem>
-              </DropdownMenu>
-            </Dropdown>
+              <Tab key="subscriptions" title="订阅" />
+              <Tab key="nodes" title="本地节点" />
+            </Tabs>
           </div>
-          {showAdvanced && (
-            <div className="flex gap-2">
-              <Input
-                size="sm"
-                type="password"
-                placeholder={t('profiles.editInfo.authTokenPlaceholder')}
-                value={authToken}
-                onValueChange={setAuthToken}
-                onKeyUp={handleInputKeyUp}
-                className="flex-1"
-              />
-              <Input
-                size="sm"
-                placeholder={t('profiles.editInfo.userAgentPlaceholder')}
-                value={userAgent}
-                onValueChange={setUserAgent}
-                onKeyUp={handleInputKeyUp}
-                className="flex-1"
-              />
-              <Input
-                size="sm"
-                type="password"
-                placeholder={t('profiles.editInfo.ageSecretKeyPlaceholder')}
-                value={ageSecretKey}
-                onValueChange={setAgeSecretKey}
-                onKeyUp={handleInputKeyUp}
-                className="flex-1"
-              />
+        </div>
+      )}
+      {showSubscriptions ? (
+        <>
+          <div className="sticky profiles-sticky top-0 z-40 bg-background">
+            <div className="flex flex-col gap-2 p-2">
+              <div className="flex gap-2">
+                <Input
+                  size="sm"
+                  placeholder={t('profiles.input.placeholder')}
+                  value={url}
+                  onValueChange={setUrl}
+                  onKeyUp={handleInputKeyUp}
+                  className="flex-1"
+                  endContent={
+                    <>
+                      <Button
+                        size="md"
+                        isIconOnly
+                        variant="light"
+                        onPress={() => {
+                          navigator.clipboard.readText().then((text) => {
+                            setUrl(text)
+                          })
+                        }}
+                        className="mr-2"
+                      >
+                        <MdContentPaste className="text-lg" />
+                      </Button>
+                      {/* p-0 m-0 覆盖 HeroUI 默认的 `p-2 -m-2`：负外边距会把点击热区外扩 8px，
+                      正好盖住左边只有 mr-2 间距的粘贴按钮，导致点按钮变成切换代理开关 */}
+                      <Checkbox
+                        className="whitespace-nowrap p-0 m-0"
+                        isSelected={useProxy}
+                        onValueChange={setUseProxy}
+                      >
+                        {t('profiles.useProxy')}
+                      </Checkbox>
+                    </>
+                  }
+                />
+
+                <Tooltip content={t('profiles.editInfo.authToken')} placement="bottom">
+                  <Button
+                    size="sm"
+                    variant={showAdvanced ? 'solid' : 'light'}
+                    isIconOnly
+                    onPress={() => setShowAdvanced(!showAdvanced)}
+                  >
+                    {showAdvanced ? (
+                      <MdUnfoldLess className="text-lg" />
+                    ) : (
+                      <MdUnfoldMore className="text-lg" />
+                    )}
+                  </Button>
+                </Tooltip>
+                <Button
+                  size="sm"
+                  color="primary"
+                  isDisabled={isUrlEmpty}
+                  isLoading={importing}
+                  onPress={handleImport}
+                >
+                  {t('profiles.import')}
+                </Button>
+                {useSubStore && (
+                  <Dropdown
+                    onOpenChange={() => {
+                      mutateSubs()
+                      mutateCollections()
+                    }}
+                  >
+                    <DropdownTrigger>
+                      <Button
+                        isLoading={subStoreImporting}
+                        title="Sub-Store"
+                        className="substore-import"
+                        size="sm"
+                        isIconOnly
+                        color="primary"
+                      >
+                        <SubStoreIcon className="text-lg" />
+                      </Button>
+                    </DropdownTrigger>
+                    <DropdownMenu
+                      className="max-h-[calc(100vh-200px)] overflow-y-auto"
+                      onAction={async (key) => {
+                        if (key === 'open-substore') {
+                          navigate('/substore')
+                        } else if (key.toString().startsWith('sub-')) {
+                          setSubStoreImporting(true)
+                          try {
+                            const sub = subs.find(
+                              (sub) => sub.name === key.toString().replace('sub-', '')
+                            )
+                            await addProfileItem({
+                              name: sub?.displayName || sub?.name || '',
+                              substore: !useCustomSubStore,
+                              type: 'remote',
+                              url: useCustomSubStore
+                                ? `${customSubStoreUrl}/download/${key.toString().replace('sub-', '')}?target=ClashMeta`
+                                : `/download/${key.toString().replace('sub-', '')}`,
+                              useProxy
+                            })
+                          } catch (e) {
+                            toast.error(String(e))
+                          } finally {
+                            setSubStoreImporting(false)
+                          }
+                        } else if (key.toString().startsWith('collection-')) {
+                          setSubStoreImporting(true)
+                          try {
+                            const collection = collections.find(
+                              (collection) =>
+                                collection.name === key.toString().replace('collection-', '')
+                            )
+                            await addProfileItem({
+                              name: collection?.displayName || collection?.name || '',
+                              type: 'remote',
+                              substore: !useCustomSubStore,
+                              url: useCustomSubStore
+                                ? `${customSubStoreUrl}/download/collection/${key.toString().replace('collection-', '')}?target=ClashMeta`
+                                : `/download/collection/${key.toString().replace('collection-', '')}`,
+                              useProxy
+                            })
+                          } catch (e) {
+                            toast.error(String(e))
+                          } finally {
+                            setSubStoreImporting(false)
+                          }
+                        }
+                      }}
+                    >
+                      {subStoreMenuItems.map((item) => (
+                        <DropdownItem
+                          startContent={item?.icon}
+                          key={item.key}
+                          showDivider={item.divider}
+                        >
+                          {item.children}
+                        </DropdownItem>
+                      ))}
+                    </DropdownMenu>
+                  </Dropdown>
+                )}
+                <Dropdown>
+                  <DropdownTrigger>
+                    <Button className="new-profile" size="sm" isIconOnly color="primary">
+                      <FaPlus />
+                    </Button>
+                  </DropdownTrigger>
+                  <DropdownMenu
+                    onAction={async (key) => {
+                      if (key === 'open') {
+                        try {
+                          const files = await getFilePath(['yml', 'yaml'])
+                          if (files?.length) {
+                            const content = await readTextFile(files[0])
+                            const fileName = files[0].split('/').pop()?.split('\\').pop()
+                            await addProfileItem({ name: fileName, type: 'local', file: content })
+                          }
+                        } catch (e) {
+                          toast.error(String(e))
+                        }
+                      } else if (key === 'new') {
+                        await addProfileItem({
+                          name: t('profiles.newProfile'),
+                          type: 'local',
+                          file: 'proxies: []\nproxy-groups: []\nrules: []'
+                        })
+                      } else if (key === 'import') {
+                        setOpenInfoImport(true)
+                      }
+                    }}
+                  >
+                    <DropdownItem key="import">{t('profiles.import')}</DropdownItem>
+                    <DropdownItem key="open">{t('profiles.open')}</DropdownItem>
+                    <DropdownItem key="new">{t('profiles.new')}</DropdownItem>
+                  </DropdownMenu>
+                </Dropdown>
+              </div>
+              {showAdvanced && (
+                <div className="flex gap-2">
+                  <Input
+                    size="sm"
+                    type="password"
+                    placeholder={t('profiles.editInfo.authTokenPlaceholder')}
+                    value={authToken}
+                    onValueChange={setAuthToken}
+                    onKeyUp={handleInputKeyUp}
+                    className="flex-1"
+                  />
+                  <Input
+                    size="sm"
+                    placeholder={t('profiles.editInfo.userAgentPlaceholder')}
+                    value={userAgent}
+                    onValueChange={setUserAgent}
+                    onKeyUp={handleInputKeyUp}
+                    className="flex-1"
+                  />
+                  <Input
+                    size="sm"
+                    type="password"
+                    placeholder={t('profiles.editInfo.ageSecretKeyPlaceholder')}
+                    value={ageSecretKey}
+                    onValueChange={setAgeSecretKey}
+                    onKeyUp={handleInputKeyUp}
+                    className="flex-1"
+                  />
+                </div>
+              )}
+            </div>
+            <Divider />
+          </div>
+
+          {showPluginImport && (
+            <PluginInstallModal
+              key={pluginDropSeq}
+              initialFile={pluginDropFile ?? undefined}
+              initialData={pluginFileData ?? undefined}
+              onClose={() => {
+                setShowPluginImport(false)
+                setPluginDropFile(null)
+                setPluginFileData(null)
+                mutatePluginConfig()
+              }}
+            />
+          )}
+          {(pluginConfig?.items?.length ?? 0) > 0 && (
+            <div className="px-2 mt-2 mb-3 grid grid-cols-1 gap-2">
+              {pluginConfig?.items?.map((p) => (
+                <PluginItem key={p.id} item={p} onChanged={mutatePluginConfig} />
+              ))}
             </div>
           )}
-        </div>
-        <Divider />
-      </div>
-
-      {showPluginImport && (
-        <PluginInstallModal
-          key={pluginDropSeq}
-          initialFile={pluginDropFile ?? undefined}
-          initialData={pluginFileData ?? undefined}
-          onClose={() => {
-            setShowPluginImport(false)
-            setPluginDropFile(null)
-            setPluginFileData(null)
-            mutatePluginConfig()
-          }}
-        />
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <div
+              className={`${fileOver ? 'blur-sm' : ''} grid sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 m-2`}
+            >
+              <SortableContext
+                items={sortedItems.map((item) => {
+                  return item.id
+                })}
+              >
+                {sortedItems.map((item) => (
+                  <ProfileItem
+                    key={item.id}
+                    isCurrent={!simpleMode && item.id === current}
+                    addProfileItem={addProfileItem}
+                    removeProfileItem={removeProfileItem}
+                    mutateProfileConfig={mutateProfileConfig}
+                    updateProfileItem={updateProfileItem}
+                    info={item}
+                    onPress={
+                      simpleMode
+                        ? undefined
+                        : async () => {
+                            await changeCurrentProfile(item.id)
+                          }
+                    }
+                  />
+                ))}
+              </SortableContext>
+            </div>
+          </DndContext>
+        </>
+      ) : (
+        <SimpleLocalNodes />
       )}
-      {(pluginConfig?.items?.length ?? 0) > 0 && (
-        <div className="px-2 mt-2 mb-3 grid grid-cols-1 gap-2">
-          {pluginConfig?.items?.map((p) => (
-            <PluginItem key={p.id} item={p} onChanged={mutatePluginConfig} />
-          ))}
-        </div>
-      )}
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-        <div
-          className={`${fileOver ? 'blur-sm' : ''} grid sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 m-2`}
-        >
-          <SortableContext
-            items={sortedItems.map((item) => {
-              return item.id
-            })}
-          >
-            {sortedItems.map((item) => (
-              <ProfileItem
-                key={item.id}
-                isCurrent={item.id === current}
-                addProfileItem={addProfileItem}
-                removeProfileItem={removeProfileItem}
-                mutateProfileConfig={mutateProfileConfig}
-                updateProfileItem={updateProfileItem}
-                info={item}
-                onPress={async () => {
-                  await changeCurrentProfile(item.id)
-                }}
-              />
-            ))}
-          </SortableContext>
-        </div>
-      </DndContext>
     </BasePage>
   )
 }

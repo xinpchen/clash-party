@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+import i18next from 'i18next'
+import { toast } from '@renderer/components/base/toast'
 import { legacyTrafficUsageDatabase } from '@renderer/utils/legacy-traffic-db'
 import { importTrafficUsage } from '@renderer/utils/ipc'
 import {
@@ -13,8 +15,15 @@ export function useTrafficLogger(enabled = true): void {
 
   useEffect(() => {
     if (__LEGACY_BUILD__) return
+    let notified = false
     void legacyTrafficUsageDatabase
-      .migrateToBackend(importTrafficUsage)
+      .migrateToBackend((batch) => {
+        if (!notified) {
+          notified = true
+          toast.info(i18next.t('traffic.migration.notice'), undefined, 8000)
+        }
+        return importTrafficUsage(batch)
+      })
       .catch((error) => console.error('[TrafficLogger] migration failed', error))
   }, [])
 

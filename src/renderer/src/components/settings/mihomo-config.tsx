@@ -39,6 +39,7 @@ const MihomoConfig: React.FC = () => {
     gistAgeRecipient = '',
     gistAgeSecretKey = '',
     autoCloseConnection = true,
+    autoCloseConnectionOnlyGroup = false,
     testProfileOnStart = true,
     pauseSSID = [],
     disableDnsOnPauseSSID = false,
@@ -458,6 +459,26 @@ const MihomoConfig: React.FC = () => {
           isSelected={autoCloseConnection}
           onValueChange={(v) => {
             patchAppConfig({ autoCloseConnection: v })
+          }}
+        />
+      </SettingItem>
+      <SettingItem
+        title={t('mihomo.autoCloseConnectionOnlyGroup')}
+        actions={
+          <Tooltip content={t('mihomo.autoCloseConnectionOnlyGroupTooltip')}>
+            <Button isIconOnly size="sm" variant="light">
+              <IoIosHelpCircle className="text-lg" />
+            </Button>
+          </Tooltip>
+        }
+        divider
+      >
+        <Switch
+          size="sm"
+          isDisabled={!autoCloseConnection}
+          isSelected={autoCloseConnectionOnlyGroup}
+          onValueChange={(v) => {
+            patchAppConfig({ autoCloseConnectionOnlyGroup: v })
           }}
         />
       </SettingItem>

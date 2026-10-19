@@ -39,6 +39,9 @@ interface MigrationState {
   key: typeof MIGRATION_KEY
   lastId: number
   complete: boolean
+  target?: 'backend'
+  migrationId?: string
+  sequence?: number
 }
 
 interface BackendMigrationState {
@@ -357,6 +360,10 @@ class LegacyTrafficUsageDatabase {
       await transactionComplete(transaction)
       return true
     }
+    if (state?.target === 'backend') {
+      await transactionComplete(transaction)
+      return true
+    }
 
     const aggregates = new Map<string, TrafficUsageRecord>()
     let count = 0
@@ -393,10 +400,109 @@ class LegacyTrafficUsageDatabase {
   private async runBackendMigration(
     importBatch: (batch: TrafficUsageImportBatch) => Promise<void>
   ): Promise<void> {
-    await this.runMigration()
+    await this.migrateLegacyLogsToBackend(importBatch)
     while (!(await this.migrateBackendChunk(importBatch))) {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
+  }
+
+  private async migrateLegacyLogsToBackend(
+    importBatch: (batch: TrafficUsageImportBatch) => Promise<void>
+  ): Promise<void> {
+    const database = await this.open()
+    if (!database.objectStoreNames.contains(LEGACY_STORE)) return
+
+    while (!(await this.migrateLegacyLogsChunk(importBatch))) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  }
+
+  private async migrateLegacyLogsChunk(
+    importBatch: (batch: TrafficUsageImportBatch) => Promise<void>
+  ): Promise<boolean> {
+    const state = await this.legacyMigrationState()
+    if (state.complete) return true
+
+    const { records, lastId, complete } = await this.readLegacyChunk(state.lastId)
+    let sequence = state.sequence ?? 0
+    for (let offset = 0; offset < records.length; offset += TRAFFIC_USAGE_MIGRATION_CHUNK_SIZE) {
+      const batch = records.slice(offset, offset + TRAFFIC_USAGE_MIGRATION_CHUNK_SIZE)
+      await importBatch({ id: `${state.migrationId}-${sequence}`, records: batch })
+      sequence += 1
+    }
+
+    const database = await this.open()
+    const transaction = database.transaction([LEGACY_STORE, META_STORE], 'readwrite')
+    transaction.objectStore(META_STORE).put({
+      key: MIGRATION_KEY,
+      lastId,
+      complete,
+      target: 'backend',
+      migrationId: state.migrationId,
+      sequence
+    } satisfies MigrationState)
+    // Delete only after the corresponding backend batches have been accepted.
+    // This keeps the migration resumable while preventing LevelDB from
+    // retaining the entire legacy log until the final chunk.
+    if (lastId > 0) {
+      transaction.objectStore(LEGACY_STORE).delete(IDBKeyRange.upperBound(lastId))
+    }
+    await transactionComplete(transaction)
+    return complete
+  }
+
+  private async legacyMigrationState(): Promise<MigrationState> {
+    const database = await this.open()
+    const transaction = database.transaction(META_STORE, 'readonly')
+    const stored = (await requestResult(transaction.objectStore(META_STORE).get(MIGRATION_KEY))) as
+      MigrationState | undefined
+    await transactionComplete(transaction)
+
+    if (stored?.complete) return stored
+    if (stored?.migrationId) return stored
+
+    const initial: MigrationState = {
+      key: MIGRATION_KEY,
+      lastId: stored?.lastId ?? 0,
+      complete: false,
+      target: 'backend',
+      migrationId: crypto.randomUUID(),
+      sequence: stored?.sequence ?? 0
+    }
+    const createTransaction = database.transaction(META_STORE, 'readwrite')
+    createTransaction.objectStore(META_STORE).put(initial)
+    await transactionComplete(createTransaction)
+    return initial
+  }
+
+  private async readLegacyChunk(
+    lastId: number
+  ): Promise<{ records: TrafficUsageRecord[]; lastId: number; complete: boolean }> {
+    const database = await this.open()
+    const transaction = database.transaction(LEGACY_STORE, 'readonly')
+    const store = transaction.objectStore(LEGACY_STORE)
+    const records = new Map<string, TrafficUsageRecord>()
+    let nextLastId = lastId
+    let count = 0
+    let complete = false
+    const range = lastId > 0 ? IDBKeyRange.lowerBound(lastId, true) : undefined
+    const request = store.openCursor(range)
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) {
+        complete = true
+        return
+      }
+
+      const log = cursor.value as LegacyDataUsageLog
+      nextLastId = log.id
+      for (const record of legacyRecords(log)) mergeRecord(records, record)
+      count += 1
+      if (count < TRAFFIC_USAGE_MIGRATION_CHUNK_SIZE) cursor.continue()
+    }
+    request.onerror = () => transaction.abort()
+    await transactionComplete(transaction)
+    return { records: Array.from(records.values()), lastId: nextLastId, complete }
   }
 
   private async migrateBackendChunk(

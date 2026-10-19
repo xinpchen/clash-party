@@ -1,7 +1,7 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter } from '@heroui/react'
 import { toast } from '@renderer/components/base/toast'
 import BorderSwitch from '@renderer/components/base/border-switch'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { triggerSysProxy, updateTrayIconImmediate } from '@renderer/utils/ipc'
 import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-config'
@@ -10,16 +10,17 @@ import React from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useTranslation } from 'react-i18next'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const SysproxySwitcher: React.FC<Props> = (props) => {
   const { t } = useTranslation()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/sysproxy')
   const { appConfig, patchAppConfig } = useAppConfig()
   const { controledMihomoConfig } = useControledMihomoConfig()
@@ -60,21 +61,20 @@ const SysproxySwitcher: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${sysproxyCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.systemProxy')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/sysproxy')
-            }}
-          >
-            <AiOutlineGlobal className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={sysproxyCardStatus}
+        title={t('sider.cards.systemProxy')}
+        route="/sysproxy"
+        icon={<AiOutlineGlobal className="text-[20px]" />}
+        expanded={expanded}
+      >
+        <BorderSwitch
+          aria-label={t('sider.cards.systemProxy')}
+          isShowBorder={match && enable}
+          isSelected={enable ?? false}
+          onValueChange={onChange}
+        />
+      </SiderItem>
     )
   }
 

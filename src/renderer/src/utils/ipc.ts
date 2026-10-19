@@ -24,7 +24,7 @@ interface IpcApi {
   // Mihomo API
   mihomoVersion: () => Promise<IMihomoVersion>
   mihomoCloseConnection: (id: string) => Promise<void>
-  mihomoCloseAllConnections: () => Promise<void>
+  mihomoCloseAllConnections: (group?: string) => Promise<void>
   mihomoRules: () => Promise<IMihomoRulesInfo>
   mihomoRulesDisable: (rules: Record<string, boolean>) => Promise<void>
   mihomoProxies: () => Promise<IMihomoProxies>
@@ -74,9 +74,15 @@ interface IpcApi {
   getProfileItem: (id: string | undefined) => Promise<IProfileItem>
   getProfileStr: (id: string) => Promise<string>
   setProfileStr: (id: string, str: string) => Promise<void>
-  addProfileItem: (item: Partial<IProfileItem>) => Promise<void>
+  addProfileItem: (
+    item: Partial<IProfileItem>,
+    simpleOptions?: import('../../../shared/simple-config').SimpleSubscriptionOptions
+  ) => Promise<void>
   removeProfileItem: (id: string) => Promise<void>
-  updateProfileItem: (item: IProfileItem) => Promise<void>
+  updateProfileItem: (
+    item: IProfileItem,
+    simpleOptions?: import('../../../shared/simple-config').SimpleSubscriptionOptions
+  ) => Promise<void>
   changeCurrentProfile: (id: string) => Promise<void>
   addProfileUpdater: (item: IProfileItem) => Promise<void>
   removeProfileUpdater: (id: string) => Promise<void>
@@ -97,6 +103,73 @@ interface IpcApi {
   getRuntimeConfigStr: () => Promise<string>
   getRuleStr: (id: string) => Promise<string>
   setRuleStr: (id: string, str: string) => Promise<void>
+  getSimpleConfig: () => Promise<import('../../../shared/simple-config').SimpleState>
+  getSimpleNode: (name?: string) => Promise<import('../../../shared/simple-config').SimpleObject>
+  createSimpleNodes: (
+    values: import('../../../shared/simple-config').SimpleObject[]
+  ) => Promise<void>
+  saveSimpleNode: (
+    name: string,
+    value: import('../../../shared/simple-config').SimpleObject,
+    expected: import('../../../shared/simple-config').SimpleObject
+  ) => Promise<void>
+  removeSimpleNode: (
+    name: string,
+    expected: import('../../../shared/simple-config').SimpleObject
+  ) => Promise<void>
+  getSimpleRulesEditor: () => Promise<import('../../../shared/simple-config').SimpleRuleEditor>
+  saveSimpleRules: (
+    change: import('../../../shared/simple-config').SimpleRuleChange,
+    expected: string[]
+  ) => Promise<void>
+  saveSimpleRuleProvider: (
+    name: string | undefined,
+    nextName: string,
+    value: import('../../../shared/simple-config').SimpleObject | null,
+    expected?: import('../../../shared/simple-config').SimpleObject
+  ) => Promise<void>
+  getSimpleProxyGroup: (
+    name?: string
+  ) => Promise<import('../../../shared/simple-config').SimpleProxyGroupEditor>
+  createSimpleProxyGroup: (
+    value: import('../../../shared/simple-config').SimpleObject
+  ) => Promise<void>
+  saveSimpleProxyGroup: (
+    name: string,
+    value: import('../../../shared/simple-config').SimpleObject,
+    expected: import('../../../shared/simple-config').SimpleObject
+  ) => Promise<void>
+  reorderSimpleProxyGroups: (names: string[]) => Promise<void>
+  removeSimpleProxyGroup: (
+    name: string,
+    expected: import('../../../shared/simple-config').SimpleObject
+  ) => Promise<void>
+  saveSimpleDraft: (
+    draft: import('../../../shared/simple-config').SimpleDraft
+  ) => Promise<import('../../../shared/simple-config').SimplePreview>
+  previewSimpleConfig: () => Promise<import('../../../shared/simple-config').SimplePreview>
+  publishSimpleConfig: (
+    draft?: import('../../../shared/simple-config').SimpleDraft
+  ) => Promise<import('../../../shared/simple-config').SimplePreview>
+  exportSimpleConfig: () => Promise<
+    import('../../../shared/simple-config').SimplePreview & { path?: string }
+  >
+  importSimpleSubscription: (input: {
+    name: string
+    url?: string
+    profileId?: string
+    mode: import('../../../shared/simple-config').SimpleSource['mode']
+    prefix?: string
+    interval?: number
+  }) => Promise<{
+    source: import('../../../shared/simple-config').SimpleSource
+    preview: import('../../../shared/simple-config').SimplePreview
+  }>
+  refreshSimpleSource: (
+    id: string
+  ) => Promise<import('../../../shared/simple-config').SimplePreview>
+  removeSimpleSource: (id: string) => Promise<import('../../../shared/simple-config').SimplePreview>
+  setOperationMode: (mode: 'standard' | 'simple') => Promise<void>
   getFilePath: (ext: string[], title?: string, filterName?: string) => Promise<string[] | undefined>
   readTextFile: (filePath: string) => Promise<string>
   readImageFileDataURL: (filePath: string) => Promise<string>
@@ -278,6 +351,27 @@ export const {
   getRuntimeConfigStr,
   getRuleStr,
   setRuleStr,
+  getSimpleConfig,
+  getSimpleNode,
+  createSimpleNodes,
+  saveSimpleNode,
+  removeSimpleNode,
+  getSimpleProxyGroup,
+  getSimpleRulesEditor,
+  saveSimpleRules,
+  saveSimpleRuleProvider,
+  createSimpleProxyGroup,
+  saveSimpleProxyGroup,
+  removeSimpleProxyGroup,
+  reorderSimpleProxyGroups,
+  saveSimpleDraft,
+  previewSimpleConfig,
+  publishSimpleConfig,
+  exportSimpleConfig,
+  importSimpleSubscription,
+  refreshSimpleSource,
+  removeSimpleSource,
+  setOperationMode,
   getFilePath,
   readTextFile,
   readImageFileDataURL,
@@ -415,12 +509,6 @@ export function updateTrayIconImmediate(sysProxyEnabled: boolean, tunEnabled: bo
   window.electron.ipcRenderer.invoke('updateTrayIconImmediate', sysProxyEnabled, tunEnabled)
 }
 
-// getAppName: 获取应用程序名称
-export async function getAppName(appPath: string): Promise<string> {
-  return invoke<string>('getAppName', appPath)
-}
-
-// getIconDataURL: 获取应用图标的 Base64 数据
-export async function getIconDataURL(appPath: string): Promise<string> {
-  return invoke<string>('getIconDataURL', appPath)
+export function getAppInfo(metadata: IMihomoConnectionDetail['metadata']): Promise<IAppInfo> {
+  return invoke<IAppInfo>('getAppInfo', metadata)
 }

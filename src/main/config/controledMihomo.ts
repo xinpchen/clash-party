@@ -9,6 +9,8 @@ import { deepMerge } from '../utils/merge'
 import { createLogger } from '../utils/logger'
 import { atomicWriteFile, WriteQueue } from '../utils/safeFile'
 import { DEFAULT_CONTROL_DNS, DEFAULT_CONTROL_SNIFF } from '../../shared/appConfig'
+import { SIMPLE_SHARED_CONFIG_KEYS } from '../../shared/simple-config'
+import type { SimpleSharedConfig } from '../simple/compiler'
 import { getAppConfig, patchAppConfig } from './app'
 import { recoverDNS, setPublicDNS, tunDnsTransition } from '../core/dns'
 
@@ -53,12 +55,44 @@ export async function getControledMihomoConfig(force = false): Promise<Partial<I
   }
   if (typeof controledMihomoConfig !== 'object')
     controledMihomoConfig = cloneDefaultControledMihomoConfig()
+  if ((await getAppConfig()).operationMode === 'simple') {
+    const { getSimpleState } = await import('../simple/store')
+    const state = await getSimpleState()
+    const simpleConfig: Partial<IMihomoConfig> = {}
+    try {
+      const general = parse(state.published.modules.general)
+      if (general && typeof general === 'object' && !Array.isArray(general)) {
+        Object.assign(simpleConfig, general)
+      }
+    } catch (error) {
+      controledMihomoLogger.warn('Failed to parse simple general module', error)
+    }
+    for (const key of SIMPLE_SHARED_CONFIG_KEYS) {
+      const value = controledMihomoConfig[key]
+      if (value !== undefined && !['dns', 'hosts', 'tun', 'sniffer'].includes(key)) {
+        ;(simpleConfig as Record<string, unknown>)[key] = structuredClone(value)
+      }
+    }
+    for (const module of ['dns', 'hosts', 'tun', 'sniffer'] as const) {
+      const value = controledMihomoConfig[module]
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        ;(simpleConfig as Record<string, unknown>)[module] = structuredClone(value)
+      }
+    }
+    return simpleConfig
+  }
   return controledMihomoConfig
 }
 
 export async function patchControledMihomoConfig(patch: Partial<IMihomoConfig>): Promise<void> {
   await controledMihomoWriteQueue.run(async () => {
     const appConfig = await getAppConfig()
+    if (appConfig.operationMode === 'simple') {
+      const { patchSimpleModules } = await import('../simple/service')
+      await patchSimpleModules(patch)
+      if (patch['log-level']) await startMihomoLogs()
+      return
+    }
     const {
       controlDns = DEFAULT_CONTROL_DNS,
       controlSniff = DEFAULT_CONTROL_SNIFF,
@@ -176,4 +210,16 @@ export async function patchControledMihomoConfig(patch: Partial<IMihomoConfig>):
       controledMihomoLogger.warn('Failed to schedule runtime config Gist sync', error)
     }
   })
+}
+
+// Called inside the simple configuration write queue; preserve all standard-only fields.
+export async function writeSimpleSharedConfig(shared: SimpleSharedConfig): Promise<void> {
+  if (!controledMihomoConfig) await getControledMihomoConfig(true)
+  const next = structuredClone(controledMihomoConfig || cloneDefaultControledMihomoConfig())
+  for (const key of SIMPLE_SHARED_CONFIG_KEYS) {
+    if (shared[key] === undefined) delete next[key]
+    else (next as Record<string, unknown>)[key] = structuredClone(shared[key])
+  }
+  await atomicWriteFile(controledMihomoConfigPath(), stringify(next), { encoding: 'utf8' })
+  controledMihomoConfig = next
 }

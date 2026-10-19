@@ -1,26 +1,44 @@
 import {
   mihomoRuleProviders,
   mihomoUpdateRuleProviders,
-  getRuntimeConfig
+  getRuntimeConfig,
+  getSimpleRulesEditor,
+  saveSimpleRuleProvider
 } from '@renderer/utils/ipc'
 import { getHash } from '@renderer/utils/hash'
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import React, { Fragment, useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { Button, Chip, Input } from '@heroui/react'
+import { Button, Chip, Input, Spinner } from '@heroui/react'
 import { toast } from '@renderer/components/base/toast'
 import { IoMdRefresh } from 'react-icons/io'
 import { CgLoadbarDoc } from 'react-icons/cg'
-import { MdEditDocument } from 'react-icons/md'
+import { MdEdit, MdEditDocument } from 'react-icons/md'
 import dayjs from '@renderer/utils/dayjs'
 import { useTranslation } from 'react-i18next'
 import { includesIgnoreCase } from '@renderer/utils/includes'
+import { useAppConfig } from '@renderer/hooks/use-app-config'
+import { FaPlus } from 'react-icons/fa6'
 import SettingItem from '../base/base-setting-item'
 import SettingCard from '../base/base-setting-card'
+import type { SimpleRuleEditor } from '../../../../shared/simple-config'
+import DeleteResourceButton from '../simple/delete-resource-button'
 import Viewer from './viewer'
+import RuleProviderEditorModal from './rule-provider-editor-modal'
 
-const RuleProvider: React.FC = () => {
+const RuleProvider: React.FC<{ editing?: boolean }> = (props) => {
   const { t } = useTranslation()
+  const { appConfig } = useAppConfig()
+  const editing = !!props.editing && appConfig?.operationMode === 'simple'
+  const {
+    data: editorData,
+    error: editorError,
+    mutate: refreshEditor
+  } = useSWR(editing ? 'getSimpleRulesEditor' : null, getSimpleRulesEditor)
   const [filter, setFilter] = useState('')
+  const [editor, setEditor] = useState<{ name?: string; data: SimpleRuleEditor }>()
+  useEffect(() => {
+    if (!editing) setEditor(undefined)
+  }, [editing])
   const [showDetails, setShowDetails] = useState({
     show: false,
     path: '',
@@ -53,7 +71,27 @@ const RuleProvider: React.FC = () => {
   }, [showDetails.title])
 
   const { data, mutate } = useSWR('mihomoRuleProviders', mihomoRuleProviders)
+  useEffect(() => {
+    return window.electron.ipcRenderer.on('simpleConfigUpdated', () => {
+      void mutate()
+      if (editing) void refreshEditor()
+    })
+  }, [editing, mutate, refreshEditor])
   const allProviders = useMemo(() => {
+    if (editing)
+      return Object.entries(editorData?.ruleProviders || {}).map(
+        ([name, value]): IMihomoRuleProvider => ({
+          name,
+          type: 'Rule',
+          behavior: String(value.behavior || 'domain'),
+          format: String(value.format || 'yaml'),
+          ruleCount:
+            data?.providers?.[name]?.ruleCount ||
+            (Array.isArray(value.payload) ? value.payload.length : 0),
+          updatedAt: data?.providers?.[name]?.updatedAt || '',
+          vehicleType: value.type === 'http' ? 'HTTP' : value.type === 'file' ? 'File' : 'Inline'
+        })
+      )
     if (!data || !data.providers) return []
     return Object.values(data.providers).sort((a, b) => {
       if (a.vehicleType === 'File' && b.vehicleType !== 'File') {
@@ -64,11 +102,17 @@ const RuleProvider: React.FC = () => {
       }
       return 0
     })
-  }, [data])
+  }, [data, editing, editorData])
   const providers = useMemo(() => {
     return allProviders.filter((p) => !filter || includesIgnoreCase(p.name, filter))
   }, [allProviders, filter])
   const [updating, setUpdating] = useState(Array(providers.length).fill(false))
+  const updatable = providers
+    .map((provider, index) => ({ provider, index }))
+    .filter(
+      ({ provider }) =>
+        !editing || (!!data?.providers?.[provider.name] && provider.vehicleType !== 'Inline')
+    )
 
   const onUpdate = async (name: string, index: number): Promise<void> => {
     setUpdating((prev) => {
@@ -87,13 +131,36 @@ const RuleProvider: React.FC = () => {
       })
     }
   }
+  const view = (provider: IMihomoRuleProvider): void => {
+    const current = data?.providers?.[provider.name] || provider
+    setShowDetails({
+      show: false,
+      privderType: 'rule-providers',
+      path: provider.name,
+      type: current.vehicleType,
+      title: provider.name,
+      format: current.format,
+      behavior: current.behavior || 'domain'
+    })
+  }
 
-  if (!allProviders.length) {
+  if (!allProviders.length && appConfig?.operationMode !== 'simple') {
     return null
   }
 
   return (
     <SettingCard>
+      {editing && editor && (
+        <RuleProviderEditorModal
+          name={editor.name}
+          data={editor.data}
+          onClose={() => setEditor(undefined)}
+          onSaved={() => {
+            void refreshEditor()
+            void mutate()
+          }}
+        />
+      )}
       {showDetails.show && (
         <Viewer
           path={showDetails.path}
@@ -115,11 +182,12 @@ const RuleProvider: React.FC = () => {
           }
         />
       )}
-      <SettingItem title={t('resources.ruleProviders.title')} divider>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-divider pb-2">
+        <h4 className="min-w-0 break-words text-md">{t('resources.ruleProviders.title')}</h4>
+        <div className="flex min-w-0 items-center gap-2">
           <Input
             size="sm"
-            className="w-40"
+            className="w-28 sm:w-40"
             value={filter}
             placeholder={t('resources.ruleProviders.filter')}
             isClearable
@@ -128,8 +196,9 @@ const RuleProvider: React.FC = () => {
           <Button
             size="sm"
             color="primary"
+            isDisabled={!updatable.length}
             onPress={() => {
-              providers.forEach((provider, index) => {
+              updatable.forEach(({ provider, index }) => {
                 onUpdate(provider.name, index)
               })
             }}
@@ -137,8 +206,97 @@ const RuleProvider: React.FC = () => {
             {t('resources.ruleProviders.updateAll')}
           </Button>
         </div>
-      </SettingItem>
-      {providers.length ? (
+      </div>
+      {editing && !editorData && !editorError && (
+        <div className="flex justify-center p-4">
+          <Spinner aria-label="加载规则集" />
+        </div>
+      )}
+      {editing && editorError && (
+        <div role="alert" className="py-3 text-sm text-danger">
+          {String(editorError)}
+        </div>
+      )}
+      {editing ? (
+        <>
+          {providers.map((provider, index) => (
+            <div
+              key={provider.name}
+              className="flex min-w-0 items-center gap-2 border-b border-divider py-3"
+            >
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left"
+                onClick={() => editorData && setEditor({ name: provider.name, data: editorData })}
+              >
+                <div className="truncate text-sm font-medium" title={provider.name}>
+                  {provider.name}
+                </div>
+                <div className="mt-1 truncate text-xs text-foreground-500">
+                  {provider.vehicleType} · {provider.behavior} · {provider.format} ·{' '}
+                  {provider.ruleCount}
+                </div>
+              </button>
+              <Button
+                size="sm"
+                isIconOnly
+                variant="light"
+                title="编辑规则集"
+                aria-label={`编辑规则集 ${provider.name}`}
+                onPress={() => editorData && setEditor({ name: provider.name, data: editorData })}
+              >
+                <MdEdit className="text-lg" />
+              </Button>
+              <DeleteResourceButton
+                label={`规则集 ${provider.name}`}
+                disabled={!editorData}
+                onDelete={async () => {
+                  if (!editorData) return
+                  await saveSimpleRuleProvider(
+                    provider.name,
+                    provider.name,
+                    null,
+                    editorData.ruleProviders[provider.name]
+                  )
+                  await refreshEditor()
+                  await mutate()
+                }}
+              />
+              <Button
+                size="sm"
+                isIconOnly
+                variant="light"
+                title="查看内容"
+                aria-label={`查看内容 ${provider.name}`}
+                isDisabled={!data?.providers?.[provider.name]}
+                onPress={() => view(provider)}
+              >
+                <CgLoadbarDoc className="text-lg" />
+              </Button>
+              <Button
+                size="sm"
+                isIconOnly
+                variant="light"
+                title={t('common.updater.update')}
+                isDisabled={!data?.providers?.[provider.name] || provider.vehicleType === 'Inline'}
+                onPress={() => onUpdate(provider.name, index)}
+              >
+                <IoMdRefresh className={`text-lg ${updating[index] ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
+          ))}
+          <Button
+            fullWidth
+            variant="light"
+            className="mt-2 h-14 text-foreground-500"
+            startContent={<FaPlus />}
+            isDisabled={!editorData || !!editorError}
+            onPress={() => editorData && setEditor({ data: editorData })}
+          >
+            添加规则集
+          </Button>
+        </>
+      ) : providers.length ? (
         providers.map((provider, index) => (
           <Fragment key={provider.name}>
             <SettingItem
@@ -161,15 +319,7 @@ const RuleProvider: React.FC = () => {
                   className="ml-2"
                   size="sm"
                   onPress={() => {
-                    setShowDetails({
-                      show: false,
-                      privderType: 'rule-providers',
-                      path: provider.name,
-                      type: provider.vehicleType,
-                      title: provider.name,
-                      format: provider.format,
-                      behavior: provider.behavior || 'domain'
-                    })
+                    view(provider)
                   }}
                 >
                   {provider.vehicleType === 'File' ? (

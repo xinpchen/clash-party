@@ -1,31 +1,27 @@
 import {
   Button,
   Card,
-  CardBody,
-  CardFooter,
-  Chip,
   Dropdown,
   DropdownItem,
   DropdownMenu,
   DropdownTrigger,
-  Progress,
   Tooltip
 } from '@heroui/react'
-import { calcPercent, calcTraffic } from '@renderer/utils/calc'
 import { IoMdMore, IoMdRefresh } from 'react-icons/io'
 import dayjs from '@renderer/utils/dayjs'
 import React, { Key, useMemo, useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { openFile, updatePluginProfile } from '@renderer/utils/ipc'
-import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { useTranslation } from 'react-i18next'
+import { useAppConfig } from '@renderer/hooks/use-app-config'
 import BaseConfirmModal from '../base/base-confirm-modal'
 import EditRulesModal from './edit-rules-modal'
 import EditTunnelsModal from './edit-tunnels-modal'
 import EditInfoModal from './edit-info-modal'
 import EditFileModal from './edit-file-modal'
 import QrCodeModal from './qr-code-modal'
+import ProfileCardContent from './profile-card-content'
 
 interface Props {
   info: IProfileItem
@@ -34,7 +30,7 @@ interface Props {
   updateProfileItem: (item: IProfileItem) => Promise<void>
   removeProfileItem: (id: string) => Promise<void>
   mutateProfileConfig: () => void
-  onPress: () => Promise<void>
+  onPress?: () => Promise<void>
 }
 
 interface MenuItem {
@@ -46,6 +42,8 @@ interface MenuItem {
 }
 const ProfileItem: React.FC<Props> = (props) => {
   const { t } = useTranslation()
+  const { appConfig } = useAppConfig()
+  const simpleMode = appConfig?.operationMode === 'simple'
   const {
     info,
     addProfileItem,
@@ -55,11 +53,6 @@ const ProfileItem: React.FC<Props> = (props) => {
     onPress,
     isCurrent
   } = props
-  const extra = info?.extra
-  const usage = (extra?.upload ?? 0) + (extra?.download ?? 0)
-  const total = extra?.total ?? 0
-  const { appConfig, patchAppConfig } = useAppConfig()
-  const { profileDisplayDate = 'expire' } = appConfig || {}
   const [updating, setUpdating] = useState(false)
   const [openInfoEditor, setOpenInfoEditor] = useState(false)
   const [openFileEditor, setOpenFileEditor] = useState(false)
@@ -145,8 +138,10 @@ const ProfileItem: React.FC<Props> = (props) => {
         className: ''
       } as MenuItem)
     }
-    return list
-  }, [info, t])
+    return simpleMode
+      ? list.filter((item) => !['edit-rules', 'edit-tunnels'].includes(item.key))
+      : list
+  }, [info, t, simpleMode])
 
   const onMenuAction = async (key: Key): Promise<void> => {
     switch (key) {
@@ -226,7 +221,7 @@ const ProfileItem: React.FC<Props> = (props) => {
 
     // 处理卡片选中
     if (!isActuallyDragging && !isDragging && clickStartPos) {
-      onPress()
+      onPress?.()
     }
 
     cleanup()
@@ -243,8 +238,10 @@ const ProfileItem: React.FC<Props> = (props) => {
       }}
     >
       {openFileEditor && <EditFileModal id={info.id} onClose={() => setOpenFileEditor(false)} />}
-      {openRulesEditor && <EditRulesModal id={info.id} onClose={() => setOpenRulesEditor(false)} />}
-      {openTunnelsEditor && (
+      {!simpleMode && openRulesEditor && (
+        <EditRulesModal id={info.id} onClose={() => setOpenRulesEditor(false)} />
+      )}
+      {!simpleMode && openTunnelsEditor && (
         <EditTunnelsModal id={info.id} onClose={() => setOpenTunnelsEditor(false)} />
       )}
       {openQrCode && info.url && (
@@ -276,7 +273,7 @@ const ProfileItem: React.FC<Props> = (props) => {
         fullWidth
         isPressable={false}
         onContextMenu={handleContextMenu}
-        className={`${isCurrent ? 'bg-primary' : ''} cursor-pointer transition-colors duration-150`}
+        className={`${isCurrent ? 'bg-primary' : ''} ${onPress ? 'cursor-pointer' : 'cursor-default'} transition-colors duration-150`}
       >
         <div
           ref={setNodeRef}
@@ -287,14 +284,10 @@ const ProfileItem: React.FC<Props> = (props) => {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
         >
-          <CardBody className="pb-1">
-            <div className="flex justify-between h-8">
-              <h3
-                title={info?.name}
-                className={`text-ellipsis whitespace-nowrap overflow-hidden text-md font-bold leading-8 ${isCurrent ? 'text-primary-foreground' : 'text-foreground'}`}
-              >
-                {info?.name}
-              </h3>
+          <ProfileCardContent
+            info={info}
+            isCurrent={isCurrent}
+            actions={
               <div className="flex">
                 {(info.type === 'remote' || info.type === 'plugin') && (
                   <Tooltip placement="left" content={dayjs(info.updated).fromNow()}>
@@ -345,79 +338,8 @@ const ProfileItem: React.FC<Props> = (props) => {
                   </DropdownMenu>
                 </Dropdown>
               </div>
-            </div>
-            {info.type === 'remote' && extra && (
-              <div
-                className={`mt-2 flex justify-between ${isCurrent ? 'text-primary-foreground' : 'text-foreground'}`}
-              >
-                <small>{`${calcTraffic(usage)}/${calcTraffic(total)}`}</small>
-                {profileDisplayDate === 'expire' ? (
-                  <Button
-                    size="sm"
-                    variant="light"
-                    className={`h-5 p-1 m-0 ${isCurrent ? 'text-primary-foreground' : 'text-foreground'}`}
-                    onPress={async () => {
-                      await patchAppConfig({ profileDisplayDate: 'update' })
-                    }}
-                  >
-                    {extra.expire
-                      ? dayjs.unix(extra.expire).format('YYYY-MM-DD')
-                      : t('profiles.neverExpire')}
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="light"
-                    className={`h-5 p-1 m-0 ${isCurrent ? 'text-primary-foreground' : 'text-foreground'}`}
-                    onPress={async () => {
-                      await patchAppConfig({ profileDisplayDate: 'expire' })
-                    }}
-                  >
-                    {dayjs(info.updated).fromNow()}
-                  </Button>
-                )}
-              </div>
-            )}
-          </CardBody>
-          <CardFooter className="pt-0">
-            {info.type === 'remote' && !extra && (
-              <div
-                className={`w-full mt-2 flex justify-between ${isCurrent ? 'text-primary-foreground' : 'text-foreground'}`}
-              >
-                <Chip
-                  size="sm"
-                  variant="bordered"
-                  className={`${isCurrent ? 'text-primary-foreground border-primary-foreground' : 'border-primary text-primary'}`}
-                >
-                  {t('profiles.remote')}
-                </Chip>
-                <small>{dayjs(info.updated).fromNow()}</small>
-              </div>
-            )}
-            {info.type === 'local' && (
-              <div
-                className={`mt-2 flex justify-between ${isCurrent ? 'text-primary-foreground' : 'text-foreground'}`}
-              >
-                <Chip
-                  size="sm"
-                  variant="bordered"
-                  className={`${isCurrent ? 'text-primary-foreground border-primary-foreground' : 'border-primary text-primary'}`}
-                >
-                  {t('profiles.local')}
-                </Chip>
-              </div>
-            )}
-            {extra && (
-              <Progress
-                className="w-full"
-                aria-label={t('profiles.trafficUsage')}
-                classNames={{
-                  indicator: isCurrent ? 'bg-primary-foreground' : 'bg-foreground'
-                }}
-                value={calcPercent(extra?.upload, extra?.download, extra?.total)}
-              />
-            )}
-          </CardFooter>
+            }
+          />
         </div>
       </Card>
     </div>

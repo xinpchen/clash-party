@@ -71,6 +71,7 @@ export const buildContextMenu = async (): Promise<Menu> => {
     sysProxy,
     envType = process.platform === 'win32' ? ['powershell'] : ['bash'],
     autoCloseConnection,
+    autoCloseConnectionOnlyGroup = false,
     proxyInTray = true,
     showCurrentProxyInTray = false,
     trayProxyGroupStyle = 'default',
@@ -129,7 +130,9 @@ export const buildContextMenu = async (): Promise<Menu> => {
                 click: async (): Promise<void> => {
                   await mihomoChangeProxy(group.name, proxy.name)
                   if (autoCloseConnection) {
-                    await mihomoCloseAllConnections()
+                    await mihomoCloseAllConnections(
+                      autoCloseConnectionOnlyGroup ? group.name : undefined
+                    )
                   }
                 }
               }
@@ -620,7 +623,7 @@ const getIconPaths = (): Record<TrayIconStatus, string> => {
 // 也就是“显示网速时图标颜色无效”（#1143）。这里把该用哪张图、文字用什么颜色告诉渲染进程，
 // 由它连状态色一起画进去；不带状态色时保持原样，继续走 template image。
 export async function getTrayTrafficStyle(): Promise<ITrayTrafficStyle> {
-  const { disableTrayIconColor = false } = await getAppConfig()
+  const { disableTrayIconColor = false, trayTrafficTextColor = 'auto' } = await getAppConfig()
   const status = await getTrayIconStatus()
   const colored = !disableTrayIconColor && status !== 'white'
   const source = nativeImage.createFromPath(colored ? getIconPaths()[status] : templateIcon)
@@ -635,10 +638,19 @@ export async function getTrayTrafficStyle(): Promise<ITrayTrafficStyle> {
     process.platform === 'darwin' &&
     systemPreferences.getUserDefault('AppleInterfaceStyle', 'string') === 'Dark'
 
+  const textColor =
+    trayTrafficTextColor === 'white'
+      ? '#ffffff'
+      : trayTrafficTextColor === 'black'
+        ? '#000000'
+        : colored && systemDark
+          ? '#ffffff'
+          : '#000000'
+
   return {
     icon: icon.isEmpty() ? '' : icon.toDataURL(),
     colored,
-    textColor: colored && systemDark ? '#ffffff' : '#000000'
+    textColor
   }
 }
 

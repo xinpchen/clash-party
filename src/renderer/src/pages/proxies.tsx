@@ -8,7 +8,9 @@ import {
   DropdownItem,
   DropdownMenu,
   DropdownSection,
-  DropdownTrigger
+  DropdownTrigger,
+  Switch,
+  Spinner
 } from '@heroui/react'
 import BasePage from '@renderer/components/base/base-page'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
@@ -16,7 +18,10 @@ import {
   getImageDataURL,
   mihomoChangeProxy,
   mihomoCloseAllConnections,
-  mihomoProxyDelay
+  mihomoProxyDelay,
+  getSimpleConfig,
+  reorderSimpleProxyGroups,
+  removeSimpleProxyGroup
 } from '@renderer/utils/ipc'
 import { FaLocationCrosshairs } from 'react-icons/fa6'
 import { CgDetailsLess, CgDetailsMore } from 'react-icons/cg'
@@ -24,9 +29,11 @@ import { TbCircleLetterD } from 'react-icons/tb'
 import { RxLetterCaseCapitalize } from 'react-icons/rx'
 import {
   MdCheck,
+  MdAdd,
   MdDoubleArrow,
   MdFilterAlt,
   MdOutlineSpeed,
+  MdEdit,
   MdVisibilityOff
 } from 'react-icons/md'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
@@ -39,9 +46,33 @@ import { includesIgnoreCase } from '@renderer/utils/includes'
 import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-config'
 import { useTranslation } from 'react-i18next'
 import { HiOutlineAdjustmentsHorizontal } from 'react-icons/hi2'
+import useSWR from 'swr'
+import { parse } from 'yaml'
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type Modifier
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable'
+import GroupEditorModal from '@renderer/components/proxies/group-editor-modal'
+import DeleteResourceButton from '@renderer/components/simple/delete-resource-button'
+import SortableGroup from '@renderer/components/proxies/sortable-group'
+import { toast } from '@renderer/components/base/toast'
+import type { SimpleObject } from '../../../shared/simple-config'
 
 const GROUP_EXPAND_STATE_KEY = 'proxy_group_expand_state'
 const EMPTY_GROUPS: IMihomoMixedGroup[] = []
+const restrictToVerticalAxis: Modifier = ({ transform }) => ({ ...transform, x: 0 })
 
 interface GroupExpandState {
   byName: Record<string, boolean>
@@ -147,18 +178,117 @@ const Proxies: React.FC = () => {
   const { controledMihomoConfig } = useControledMihomoConfig()
   const { mode = 'rule' } = controledMihomoConfig || {}
   const { groups: groupData, mutate, showHidden, setShowHidden } = useGroups()
-  const groups = groupData ?? EMPTY_GROUPS
   const { appConfig, patchAppConfig } = useAppConfig()
+  const simpleMode = appConfig?.operationMode === 'simple'
+  const [editMode, setEditMode] = useState(false)
+  const editing = simpleMode && editMode
+  const [editingGroup, setEditingGroup] = useState<string>()
+  const [creatingGroup, setCreatingGroup] = useState(false)
+  const [savingOrder, setSavingOrder] = useState(false)
+  const [groupOrder, setGroupOrder] = useState<string[]>()
+  const dragging = useRef(false)
+  const lastDragEnd = useRef(0)
+  const {
+    data: simpleState,
+    error: simpleError,
+    mutate: mutateSimple
+  } = useSWR(editing ? 'getSimpleConfig' : null, getSimpleConfig)
+  const { configuredGroups, groupConfigError } = useMemo(() => {
+    if (!simpleState) return { configuredGroups: [] }
+    try {
+      const parsed: unknown = parse(simpleState.draft.modules['proxy-groups'])
+      if (
+        !Array.isArray(parsed) ||
+        parsed.some((group) => !group || typeof group.name !== 'string')
+      ) {
+        throw new Error('代理组配置必须是包含名称的对象列表')
+      }
+      return { configuredGroups: parsed as SimpleObject[] }
+    } catch (error) {
+      return { configuredGroups: [], groupConfigError: String(error) }
+    }
+  }, [simpleState])
+  const groups = useMemo(() => {
+    if (!editing) return groupData ?? EMPTY_GROUPS
+    const entries = configuredGroups.map((group): IMihomoMixedGroup => {
+      const runtime = groupData?.find((item) => item.name === group.name)
+      return {
+        alive: true,
+        all: [],
+        extra: {},
+        hidden: false,
+        history: [],
+        now: '',
+        tfo: false,
+        udp: true,
+        xudp: false,
+        ...runtime,
+        name: String(group.name),
+        type: String(group.type) as MihomoGroupType,
+        icon: typeof group.icon === 'string' ? group.icon : ''
+      }
+    })
+    return groupOrder
+      ? [...entries].sort((a, b) => groupOrder.indexOf(a.name) - groupOrder.indexOf(b.name))
+      : entries
+  }, [editing, configuredGroups, groupData, groupOrder])
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { delay: 250, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+  const openGroupEditor = useCallback(
+    (name: string): void => {
+      if (dragging.current || Date.now() - lastDragEnd.current < 250 || savingOrder) return
+      setEditingGroup(name)
+    },
+    [savingOrder]
+  )
+  const onGroupDragEnd = async ({ active, over }: DragEndEvent): Promise<void> => {
+    dragging.current = false
+    lastDragEnd.current = Date.now()
+    if (!over || active.id === over.id || savingOrder) return
+    const names = groups.map((group) => group.name)
+    const from = names.indexOf(String(active.id))
+    const to = names.indexOf(String(over.id))
+    if (from < 0 || to < 0) return
+    const order = arrayMove(names, from, to)
+    setGroupOrder(order)
+    setSavingOrder(true)
+    try {
+      await reorderSimpleProxyGroups(order)
+      await mutateSimple()
+      await mutate()
+    } catch (error) {
+      toast.error(String(error))
+    } finally {
+      setGroupOrder(undefined)
+      setSavingOrder(false)
+    }
+  }
+  useEffect(() => {
+    if (!simpleMode) {
+      setEditMode(false)
+      setEditingGroup(undefined)
+      setCreatingGroup(false)
+    }
+  }, [simpleMode])
+
   const {
     proxyDisplayMode = 'simple',
     proxyDisplayOrder = 'default',
     autoCloseConnection = true,
+    autoCloseConnectionOnlyGroup = false,
     proxyCols = 'auto',
     delayTestConcurrency = 50
   } = appConfig || {}
 
   const [cols, setCols] = useState(1)
-  const { virtuosoRef, isOpen, setIsOpen } = useProxyState(groupData)
+  const { virtuosoRef, isOpen, setIsOpen } = useProxyState(groups)
+
+  useEffect(() => {
+    if (editing) setIsOpen((prev) => prev.map(() => false))
+  }, [editing, setIsOpen])
+
   const [delaying, setDelaying] = useState<Set<string>[]>(() =>
     Array.from({ length: groups.length }, () => new Set<string>())
   )
@@ -202,7 +332,7 @@ const Proxies: React.FC = () => {
     const allProxies: (IMihomoProxy | IMihomoGroup)[][] = []
 
     groups.forEach((group, index) => {
-      if (isOpen[index]) {
+      if (!editing && isOpen[index]) {
         const filtered = group.all.filter((proxy) => {
           if (!proxy) return false
           if (!includesIgnoreCase(proxy.name, searchValue[index])) {
@@ -240,18 +370,19 @@ const Proxies: React.FC = () => {
     cols,
     searchValue,
     sortProxies,
-    appConfig?.hideUnavailableProxies
+    appConfig?.hideUnavailableProxies,
+    editing
   ])
 
   const onChangeProxy = useCallback(
     async (group: string, proxy: string): Promise<void> => {
       await mihomoChangeProxy(group, proxy)
       if (autoCloseConnection) {
-        await mihomoCloseAllConnections()
+        await mihomoCloseAllConnections(autoCloseConnectionOnlyGroup ? group : undefined)
       }
       mutate()
     },
-    [autoCloseConnection, mutate]
+    [autoCloseConnection, autoCloseConnectionOnlyGroup, mutate]
   )
 
   const onProxyDelay = useCallback(
@@ -450,13 +581,17 @@ const Proxies: React.FC = () => {
       }
       return groups[index] ? (
         <div
-          className={`w-full pt-2 ${index === groupCounts.length - 1 && !isOpen[index] ? 'pb-2' : ''} px-2`}
+          className={`w-full pt-2 ${index === groupCounts.length - 1 && (editing || !isOpen[index]) ? 'pb-2' : ''} px-2`}
         >
           <Card
             as="div"
             isPressable
             fullWidth
             onPress={() => {
+              if (editing) {
+                openGroupEditor(groups[index].name)
+                return
+              }
               setIsOpen((prev) => {
                 const newOpen = [...prev]
                 newOpen[index] = !prev[index]
@@ -503,74 +638,111 @@ const Proxies: React.FC = () => {
                     onPointerDown={(e) => e.stopPropagation()}
                     onKeyDown={(e) => e.stopPropagation()}
                   >
-                    {proxyDisplayMode === 'full' && (
-                      <Chip size="sm" className="my-1 mr-2">
-                        {/* 搜索时显示过滤后的节点数，显示总数会让人以为筛选没生效（#332） */}
-                        {searchValue[index] && isOpen[index]
-                          ? (allProxies[index]?.length ?? 0)
-                          : groups[index].all.length}
-                      </Chip>
+                    {editing ? (
+                      <>
+                        <Button
+                          title="编辑代理组"
+                          aria-label={`编辑 ${groups[index].name}`}
+                          variant="light"
+                          size="sm"
+                          isIconOnly
+                          isDisabled={savingOrder}
+                          onPress={() => openGroupEditor(groups[index].name)}
+                        >
+                          <MdEdit className="text-lg text-foreground-500" />
+                        </Button>
+                        <DeleteResourceButton
+                          label={`代理组 ${groups[index].name}`}
+                          disabled={savingOrder}
+                          onDelete={async () => {
+                            const group = configuredGroups.find(
+                              (entry) => entry.name === groups[index].name
+                            )
+                            if (!group) throw new Error('代理组已变化，请刷新')
+                            await removeSimpleProxyGroup(groups[index].name, group)
+                            await mutateSimple()
+                            await mutate()
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        {proxyDisplayMode === 'full' && (
+                          <Chip size="sm" className="my-1 mr-2">
+                            {/* 搜索时显示过滤后的节点数，显示总数会让人以为筛选没生效（#332） */}
+                            {searchValue[index] && isOpen[index]
+                              ? (allProxies[index]?.length ?? 0)
+                              : groups[index].all.length}
+                          </Chip>
+                        )}
+                        <CollapseInput
+                          title={t('proxies.search.placeholder')}
+                          value={searchValue[index]}
+                          onValueChange={(v) => {
+                            setSearchValue((prev) => {
+                              const newSearchValue = [...prev]
+                              newSearchValue[index] = v
+                              return newSearchValue
+                            })
+                            // 过滤会改变列表总高度。不把正在筛选的分组标题钉回顶部的话，
+                            // 它会被滚出渲染窗口而卸载，搜索框随之消失、焦点丢失，
+                            // 中文输入法的组词也被打断（#332、#1621）。
+                            virtuosoRef.current?.scrollToIndex({
+                              groupIndex: index,
+                              align: 'start'
+                            })
+                          }}
+                        />
+                        <Button
+                          title={t('proxies.locate')}
+                          variant="light"
+                          size="sm"
+                          isIconOnly
+                          onPress={() => {
+                            if (!isOpen[index]) {
+                              setIsOpen((prev) => {
+                                const newOpen = [...prev]
+                                newOpen[index] = true
+                                return newOpen
+                              })
+                            }
+                            let i = 0
+                            for (let j = 0; j < index; j++) {
+                              i += groupCounts[j]
+                            }
+                            i += Math.floor(
+                              allProxies[index].findIndex(
+                                (proxy) => proxy.name === groups[index].now
+                              ) / cols
+                            )
+                            virtuosoRef.current?.scrollToIndex({
+                              index: Math.floor(i),
+                              align: 'start'
+                            })
+                          }}
+                        >
+                          <FaLocationCrosshairs className="text-lg text-foreground-500" />
+                        </Button>
+                        <Button
+                          title={t('proxies.delay.test')}
+                          variant="light"
+                          isLoading={(delaying[index]?.size ?? 0) > 0}
+                          size="sm"
+                          isIconOnly
+                          onPress={() => {
+                            onGroupDelay(index)
+                          }}
+                        >
+                          <MdOutlineSpeed className="text-lg text-foreground-500" />
+                        </Button>
+                      </>
                     )}
-                    <CollapseInput
-                      title={t('proxies.search.placeholder')}
-                      value={searchValue[index]}
-                      onValueChange={(v) => {
-                        setSearchValue((prev) => {
-                          const newSearchValue = [...prev]
-                          newSearchValue[index] = v
-                          return newSearchValue
-                        })
-                        // 过滤会改变列表总高度。不把正在筛选的分组标题钉回顶部的话，
-                        // 它会被滚出渲染窗口而卸载，搜索框随之消失、焦点丢失，
-                        // 中文输入法的组词也被打断（#332、#1621）。
-                        virtuosoRef.current?.scrollToIndex({ groupIndex: index, align: 'start' })
-                      }}
-                    />
-                    <Button
-                      title={t('proxies.locate')}
-                      variant="light"
-                      size="sm"
-                      isIconOnly
-                      onPress={() => {
-                        if (!isOpen[index]) {
-                          setIsOpen((prev) => {
-                            const newOpen = [...prev]
-                            newOpen[index] = true
-                            return newOpen
-                          })
-                        }
-                        let i = 0
-                        for (let j = 0; j < index; j++) {
-                          i += groupCounts[j]
-                        }
-                        i += Math.floor(
-                          allProxies[index].findIndex((proxy) => proxy.name === groups[index].now) /
-                            cols
-                        )
-                        virtuosoRef.current?.scrollToIndex({
-                          index: Math.floor(i),
-                          align: 'start'
-                        })
-                      }}
-                    >
-                      <FaLocationCrosshairs className="text-lg text-foreground-500" />
-                    </Button>
-                    <Button
-                      title={t('proxies.delay.test')}
-                      variant="light"
-                      isLoading={(delaying[index]?.size ?? 0) > 0}
-                      size="sm"
-                      isIconOnly
-                      onPress={() => {
-                        onGroupDelay(index)
-                      }}
-                    >
-                      <MdOutlineSpeed className="text-lg text-foreground-500" />
-                    </Button>
                   </div>
-                  <IoIosArrowBack
-                    className={`transition duration-200 ml-2 h-8 text-lg text-foreground-500 ${isOpen[index] ? '-rotate-90' : ''}`}
-                  />
+                  {!editing && (
+                    <IoIosArrowBack
+                      className={`transition duration-200 ml-2 h-8 text-lg text-foreground-500 ${isOpen[index] ? '-rotate-90' : ''}`}
+                    />
+                  )}
                 </div>
               </div>
             </CardBody>
@@ -593,7 +765,12 @@ const Proxies: React.FC = () => {
       allProxies,
       cols,
       virtuosoRef,
-      onGroupDelay
+      onGroupDelay,
+      editing,
+      openGroupEditor,
+      configuredGroups,
+      mutateSimple,
+      savingOrder
     ]
   )
 
@@ -656,133 +833,232 @@ const Proxies: React.FC = () => {
     <BasePage
       title={t('proxies.title')}
       header={
-        <Dropdown placement="bottom-end">
-          <DropdownTrigger>
-            <Button
-              size="sm"
-              isIconOnly
-              variant="light"
-              className="app-nodrag"
-              title={t('proxies.settings')}
+        <>
+          <Dropdown placement="bottom-end" closeOnSelect={false}>
+            <DropdownTrigger>
+              <Button
+                size="sm"
+                isIconOnly
+                variant="light"
+                className="app-nodrag"
+                title={t('proxies.settings')}
+              >
+                <HiOutlineAdjustmentsHorizontal className="text-lg" />
+              </Button>
+            </DropdownTrigger>
+            <DropdownMenu
+              aria-label={t('proxies.settings')}
+              className="min-w-64 p-1"
+              onAction={(key) => {
+                switch (key) {
+                  case 'edit-groups':
+                    setEditMode((enabled) => !enabled)
+                    setEditingGroup(undefined)
+                    break
+                  case 'show-hidden':
+                    setShowHidden((prev) => !prev)
+                    break
+                  case 'hide-unavailable':
+                    void patchAppConfig({
+                      hideUnavailableProxies: !appConfig?.hideUnavailableProxies
+                    })
+                    break
+                  case 'order-default':
+                    void patchAppConfig({ proxyDisplayOrder: 'default' })
+                    break
+                  case 'order-delay':
+                    void patchAppConfig({ proxyDisplayOrder: 'delay' })
+                    break
+                  case 'order-name':
+                    void patchAppConfig({ proxyDisplayOrder: 'name' })
+                    break
+                  case 'mode-simple':
+                    void patchAppConfig({ proxyDisplayMode: 'simple' })
+                    break
+                  case 'mode-full':
+                    void patchAppConfig({ proxyDisplayMode: 'full' })
+                    break
+                }
+              }}
             >
-              <HiOutlineAdjustmentsHorizontal className="text-lg" />
-            </Button>
-          </DropdownTrigger>
-          <DropdownMenu
-            aria-label={t('proxies.settings')}
-            className="min-w-64 p-1"
-            onAction={(key) => {
-              switch (key) {
-                case 'show-hidden':
-                  setShowHidden((prev) => !prev)
-                  break
-                case 'hide-unavailable':
-                  void patchAppConfig({
-                    hideUnavailableProxies: !appConfig?.hideUnavailableProxies
-                  })
-                  break
-                case 'order-default':
-                  void patchAppConfig({ proxyDisplayOrder: 'default' })
-                  break
-                case 'order-delay':
-                  void patchAppConfig({ proxyDisplayOrder: 'delay' })
-                  break
-                case 'order-name':
-                  void patchAppConfig({ proxyDisplayOrder: 'name' })
-                  break
-                case 'mode-simple':
-                  void patchAppConfig({ proxyDisplayMode: 'simple' })
-                  break
-                case 'mode-full':
-                  void patchAppConfig({ proxyDisplayMode: 'full' })
-                  break
-              }
-            }}
-          >
-            <DropdownSection title={t('proxies.settings.visibility')} showDivider>
-              <DropdownItem
-                key="show-hidden"
-                startContent={<MdFilterAlt className="text-lg" />}
-                endContent={showHidden ? <MdCheck className="text-lg text-primary" /> : null}
-              >
-                {t(showHidden ? 'proxies.hiddenGroups.hide' : 'proxies.hiddenGroups.show')}
-              </DropdownItem>
-              <DropdownItem
-                key="hide-unavailable"
-                startContent={<MdVisibilityOff className="text-lg" />}
-                endContent={
-                  appConfig?.hideUnavailableProxies ? (
-                    <MdCheck className="text-lg text-primary" />
-                  ) : null
-                }
-              >
-                {t(
-                  appConfig?.hideUnavailableProxies
-                    ? 'proxies.hideUnavailable.enabled'
-                    : 'proxies.hideUnavailable.disabled'
-                )}
-              </DropdownItem>
-            </DropdownSection>
-            <DropdownSection title={t('proxies.settings.order')} showDivider>
-              <DropdownItem
-                key="order-default"
-                startContent={<TbCircleLetterD className="text-lg" />}
-                endContent={
-                  proxyDisplayOrder === 'default' ? (
-                    <MdCheck className="text-lg text-primary" />
-                  ) : null
-                }
-              >
-                {t('proxies.order.default')}
-              </DropdownItem>
-              <DropdownItem
-                key="order-delay"
-                startContent={<MdOutlineSpeed className="text-lg" />}
-                endContent={
-                  proxyDisplayOrder === 'delay' ? (
-                    <MdCheck className="text-lg text-primary" />
-                  ) : null
-                }
-              >
-                {t('proxies.order.delay')}
-              </DropdownItem>
-              <DropdownItem
-                key="order-name"
-                startContent={<RxLetterCaseCapitalize className="text-lg" />}
-                endContent={
-                  proxyDisplayOrder === 'name' ? <MdCheck className="text-lg text-primary" /> : null
-                }
-              >
-                {t('proxies.order.name')}
-              </DropdownItem>
-            </DropdownSection>
-            <DropdownSection title={t('proxies.settings.mode')}>
-              <DropdownItem
-                key="mode-simple"
-                startContent={<CgDetailsLess className="text-lg" />}
-                endContent={
-                  proxyDisplayMode === 'simple' ? (
-                    <MdCheck className="text-lg text-primary" />
-                  ) : null
-                }
-              >
-                {t('proxies.mode.simple')}
-              </DropdownItem>
-              <DropdownItem
-                key="mode-full"
-                startContent={<CgDetailsMore className="text-lg" />}
-                endContent={
-                  proxyDisplayMode === 'full' ? <MdCheck className="text-lg text-primary" /> : null
-                }
-              >
-                {t('proxies.mode.full')}
-              </DropdownItem>
-            </DropdownSection>
-          </DropdownMenu>
-        </Dropdown>
+              {simpleMode ? (
+                <DropdownSection showDivider>
+                  <DropdownItem
+                    key="edit-groups"
+                    startContent={<MdEdit className="text-lg" />}
+                    isDisabled={savingOrder}
+                    endContent={
+                      <Switch
+                        size="sm"
+                        aria-label="编辑模式"
+                        isSelected={editing}
+                        isReadOnly
+                        tabIndex={-1}
+                        className="pointer-events-none"
+                      />
+                    }
+                  >
+                    编辑模式
+                  </DropdownItem>
+                </DropdownSection>
+              ) : null}
+              <DropdownSection title={t('proxies.settings.visibility')} showDivider>
+                <DropdownItem
+                  key="show-hidden"
+                  startContent={<MdFilterAlt className="text-lg" />}
+                  endContent={showHidden ? <MdCheck className="text-lg text-primary" /> : null}
+                >
+                  {t(showHidden ? 'proxies.hiddenGroups.hide' : 'proxies.hiddenGroups.show')}
+                </DropdownItem>
+                <DropdownItem
+                  key="hide-unavailable"
+                  startContent={<MdVisibilityOff className="text-lg" />}
+                  endContent={
+                    appConfig?.hideUnavailableProxies ? (
+                      <MdCheck className="text-lg text-primary" />
+                    ) : null
+                  }
+                >
+                  {t(
+                    appConfig?.hideUnavailableProxies
+                      ? 'proxies.hideUnavailable.enabled'
+                      : 'proxies.hideUnavailable.disabled'
+                  )}
+                </DropdownItem>
+              </DropdownSection>
+              <DropdownSection title={t('proxies.settings.order')} showDivider>
+                <DropdownItem
+                  key="order-default"
+                  startContent={<TbCircleLetterD className="text-lg" />}
+                  endContent={
+                    proxyDisplayOrder === 'default' ? (
+                      <MdCheck className="text-lg text-primary" />
+                    ) : null
+                  }
+                >
+                  {t('proxies.order.default')}
+                </DropdownItem>
+                <DropdownItem
+                  key="order-delay"
+                  startContent={<MdOutlineSpeed className="text-lg" />}
+                  endContent={
+                    proxyDisplayOrder === 'delay' ? (
+                      <MdCheck className="text-lg text-primary" />
+                    ) : null
+                  }
+                >
+                  {t('proxies.order.delay')}
+                </DropdownItem>
+                <DropdownItem
+                  key="order-name"
+                  startContent={<RxLetterCaseCapitalize className="text-lg" />}
+                  endContent={
+                    proxyDisplayOrder === 'name' ? (
+                      <MdCheck className="text-lg text-primary" />
+                    ) : null
+                  }
+                >
+                  {t('proxies.order.name')}
+                </DropdownItem>
+              </DropdownSection>
+              <DropdownSection title={t('proxies.settings.mode')}>
+                <DropdownItem
+                  key="mode-simple"
+                  startContent={<CgDetailsLess className="text-lg" />}
+                  endContent={
+                    proxyDisplayMode === 'simple' ? (
+                      <MdCheck className="text-lg text-primary" />
+                    ) : null
+                  }
+                >
+                  {t('proxies.mode.simple')}
+                </DropdownItem>
+                <DropdownItem
+                  key="mode-full"
+                  startContent={<CgDetailsMore className="text-lg" />}
+                  endContent={
+                    proxyDisplayMode === 'full' ? (
+                      <MdCheck className="text-lg text-primary" />
+                    ) : null
+                  }
+                >
+                  {t('proxies.mode.full')}
+                </DropdownItem>
+              </DropdownSection>
+            </DropdownMenu>
+          </Dropdown>
+        </>
       }
     >
-      {mode === 'direct' ? (
+      {editing && (editingGroup !== undefined || creatingGroup) && (
+        <GroupEditorModal
+          key={creatingGroup ? 'new-group' : `edit:${editingGroup}`}
+          name={editingGroup}
+          onClose={() => {
+            setEditingGroup(undefined)
+            setCreatingGroup(false)
+          }}
+          onSaved={() => {
+            void mutateSimple()
+            void mutate()
+          }}
+        />
+      )}
+      {editing ? (
+        <>
+          {!simpleState && !simpleError && (
+            <div className="flex justify-center p-6">
+              <Spinner aria-label="加载代理组" />
+            </div>
+          )}
+          {(simpleError || groupConfigError) && (
+            <div role="alert" className="p-3 text-danger text-sm">
+              {String(simpleError || groupConfigError)}
+            </div>
+          )}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis]}
+            onDragStart={() => {
+              dragging.current = true
+            }}
+            onDragEnd={onGroupDragEnd}
+            onDragCancel={() => {
+              dragging.current = false
+              lastDragEnd.current = Date.now()
+            }}
+          >
+            <SortableContext
+              items={groups.map((group) => group.name)}
+              strategy={verticalListSortingStrategy}
+            >
+              {groups.map((group, index) => (
+                <SortableGroup
+                  key={group.name}
+                  name={group.name}
+                  disabled={savingOrder || !!editingGroup || creatingGroup}
+                >
+                  {renderGroupContent(index)}
+                </SortableGroup>
+              ))}
+            </SortableContext>
+          </DndContext>
+          <div className="px-2 pb-2">
+            <Card
+              isPressable
+              fullWidth
+              isDisabled={savingOrder || !simpleState || !!simpleError || !!groupConfigError}
+              onPress={() => setCreatingGroup(true)}
+            >
+              <CardBody className="flex h-14 flex-row items-center justify-center gap-2 text-foreground-500">
+                <MdAdd className="text-xl" />
+                <span className="text-sm">添加代理组</span>
+              </CardBody>
+            </Card>
+          </div>
+        </>
+      ) : mode === 'direct' ? (
         <div className="h-full w-full flex justify-center items-center">
           <div className="flex flex-col items-center">
             <MdDoubleArrow className="text-foreground-500 text-[100px]" />

@@ -257,6 +257,15 @@ const NetworkTopologyCard: React.FC = () => {
   const [isPaused, setIsPaused] = useState(false)
   const frozenRef = useRef<IMihomoConnectionDetail[] | null>(null)
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(new Set())
+  const chartPanRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    startScrollLeft: number
+    startScrollTop: number
+    moved: boolean
+  } | null>(null)
+  const suppressChartClickRef = useRef(false)
 
   // IPC listener
   useEffect(() => {
@@ -544,6 +553,49 @@ const NetworkTopologyCard: React.FC = () => {
     setIsPaused((p) => !p)
   }, [isPaused, connections])
 
+  const handleChartPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0) return
+    event.stopPropagation()
+    chartPanRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startScrollLeft: event.currentTarget.scrollLeft,
+      startScrollTop: event.currentTarget.scrollTop,
+      moved: false
+    }
+  }
+
+  const handleChartPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const pan = chartPanRef.current
+    if (!pan || pan.pointerId !== event.pointerId) return
+    const deltaX = event.clientX - pan.startX
+    const deltaY = event.clientY - pan.startY
+    if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 3 && !pan.moved) return
+    if (!pan.moved) event.currentTarget.setPointerCapture(event.pointerId)
+    pan.moved = true
+    event.preventDefault()
+    event.currentTarget.scrollLeft = pan.startScrollLeft - deltaX
+    event.currentTarget.scrollTop = pan.startScrollTop - deltaY
+  }
+
+  const handleChartPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const pan = chartPanRef.current
+    if (!pan || pan.pointerId !== event.pointerId) return
+    suppressChartClickRef.current = pan.moved
+    chartPanRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const handleChartClickCapture = (event: React.MouseEvent<HTMLDivElement>): void => {
+    if (!suppressChartClickRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    suppressChartClickRef.current = false
+  }
+
   return (
     <div className="rounded-xl border border-foreground/10 bg-content1 p-4 shadow-sm">
       {/* Header */}
@@ -619,7 +671,16 @@ const NetworkTopologyCard: React.FC = () => {
           <span className="text-sm">{t('network.topology.waiting')}</span>
         </div>
       ) : (
-        <div ref={containerRef} className="overflow-x-auto touch-pan-x touch-pan-y">
+        <div
+          ref={containerRef}
+          className="cursor-grab overflow-auto touch-none active:cursor-grabbing"
+          style={{ maxHeight: 'calc(100vh - 180px)' }}
+          onPointerDown={handleChartPointerDown}
+          onPointerMove={handleChartPointerMove}
+          onPointerUp={handleChartPointerUp}
+          onPointerCancel={handleChartPointerUp}
+          onClickCapture={handleChartClickCapture}
+        >
           <svg ref={svgRef} style={{ minHeight: '400px' }} />
         </div>
       )}

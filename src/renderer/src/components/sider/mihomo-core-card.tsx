@@ -1,4 +1,4 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter } from '@heroui/react'
 import { toast } from '@renderer/components/base/toast'
 import { calcTraffic } from '@renderer/utils/calc'
 import { mihomoVersion, restartCore } from '@renderer/utils/ipc'
@@ -6,24 +6,25 @@ import React, { useEffect, useState } from 'react'
 import { IoMdRefresh } from 'react-icons/io'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import PubSub from 'pubsub-js'
 import useSWR from 'swr'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { LuCpu } from 'react-icons/lu'
 import { useTranslation } from 'react-i18next'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const MihomoCoreCard: React.FC<Props> = (props) => {
   const { appConfig } = useAppConfig()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const { mihomoCoreCardStatus = 'col-span-2', disableAnimations = false } = appConfig || {}
   const { data: version, mutate } = useSWR('mihomoVersion', mihomoVersion)
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/mihomo')
   const {
     attributes,
@@ -57,21 +58,13 @@ const MihomoCoreCard: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${mihomoCoreCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.core')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/mihomo')
-            }}
-          >
-            <LuCpu className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={mihomoCoreCardStatus}
+        title={t('sider.cards.core')}
+        route="/mihomo"
+        icon={<LuCpu className="text-[20px]" />}
+        expanded={expanded}
+      />
     )
   }
 
@@ -83,7 +76,7 @@ const MihomoCoreCard: React.FC<Props> = (props) => {
         transition,
         zIndex: isDragging ? 'calc(infinity)' : undefined
       }}
-      className={`${mihomoCoreCardStatus} mihomo-core-card`}
+      className={`${mihomoCoreCardStatus} min-w-0 mihomo-core-card`}
     >
       {mihomoCoreCardStatus === 'col-span-2' ? (
         <Card
@@ -98,10 +91,11 @@ const MihomoCoreCard: React.FC<Props> = (props) => {
               ref={setNodeRef}
               {...attributes}
               {...listeners}
-              className="flex justify-between h-[32px]"
+              className="flex min-w-0 items-center justify-between gap-2 h-[32px]"
             >
               <h3
-                className={`text-md font-bold leading-[32px] ${match ? 'text-primary-foreground' : 'text-foreground'} `}
+                title={version?.version}
+                className={`min-w-0 flex-1 truncate text-md font-bold leading-[32px] ${match ? 'text-primary-foreground' : 'text-foreground'}`}
               >
                 {version?.version ?? '-'}
               </h3>
@@ -111,6 +105,7 @@ const MihomoCoreCard: React.FC<Props> = (props) => {
                 size="sm"
                 variant="light"
                 color="default"
+                className="shrink-0"
                 title={t('mihomo.restart')}
                 disabled={restarting}
                 onPress={async () => {

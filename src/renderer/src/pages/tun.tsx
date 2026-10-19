@@ -4,12 +4,7 @@ import { showErrorSync } from '@renderer/utils/error-display'
 import SettingCard from '@renderer/components/base/base-setting-card'
 import SettingItem from '@renderer/components/base/base-setting-item'
 import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-config'
-import {
-  grantTunPermissions,
-  mihomoHotReloadConfig,
-  restartCore,
-  setupFirewall
-} from '@renderer/utils/ipc'
+import { grantTunPermissions, restartCore, setupFirewall } from '@renderer/utils/ipc'
 import { platform } from '@renderer/utils/init'
 import { ipCIDRValidator } from '@renderer/utils/validate'
 import React, { Key, useState } from 'react'
@@ -100,7 +95,7 @@ const Tun: React.FC = () => {
     }
     try {
       await patchControledMihomoConfig({ ...patch, tun: tunPatch })
-      await mihomoHotReloadConfig()
+      await restartCore()
     } catch (e) {
       showErrorSync(e, t('common.error.updateCoreConfigFailed'))
     } finally {

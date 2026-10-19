@@ -22,10 +22,12 @@ import {
   mihomoProfileWorkDir,
   mihomoWorkDir,
   profileConfigPath,
-  profilePath
+  profilePath,
+  simpleConfigPath
 } from '../utils/dirs'
 import { createLogger } from '../utils/logger'
 import { atomicWriteFile } from '../utils/safeFile'
+import type { SimpleSubscriptionOptions } from '../../shared/simple-config'
 import { getAppConfig } from './app'
 import { getControledMihomoConfig } from './controledMihomo'
 import { getPluginItem, pluginSchedule } from './plugin'
@@ -187,7 +189,11 @@ export async function changeCurrentProfile(id: string): Promise<void> {
   }
 }
 
-export async function updateProfileItem(item: IProfileItem): Promise<void> {
+export async function updateProfileItem(
+  item: IProfileItem,
+  simpleOptions?: SimpleSubscriptionOptions
+): Promise<void> {
+  const previous = simpleOptions ? await getProfileItem(item.id) : undefined
   await updateProfileConfig((config) => {
     const index = config.items.findIndex((i) => i.id === item.id)
     if (index === -1) {
@@ -196,9 +202,28 @@ export async function updateProfileItem(item: IProfileItem): Promise<void> {
     config.items[index] = item
     return config
   })
+  if (simpleOptions && (await getAppConfig()).operationMode === 'simple') {
+    try {
+      const { configureSimpleSubscription } = await import('../simple/service')
+      await configureSimpleSubscription(item.id, simpleOptions)
+    } catch (error) {
+      if (previous) {
+        await updateProfileItem(previous)
+        try {
+          await mihomoHotReloadConfig()
+        } catch (restoreError) {
+          profileLogger.error('Failed to restore simple subscription settings', restoreError)
+        }
+      }
+      throw error
+    }
+  }
 }
 
-export async function addProfileItem(item: Partial<IProfileItem>): Promise<void> {
+export async function addProfileItem(
+  item: Partial<IProfileItem>,
+  simpleOptions?: SimpleSubscriptionOptions
+): Promise<void> {
   const newItem = await createProfile(item)
   let shouldChangeCurrent = false
   let newProfileIsCurrentAfterUpdate = false
@@ -215,6 +240,13 @@ export async function addProfileItem(item: Partial<IProfileItem>): Promise<void>
     }
     return config
   })
+
+  if ((await getAppConfig()).operationMode === 'simple') {
+    const { configureSimpleSubscription } = await import('../simple/service')
+    await addProfileUpdater(newItem)
+    await configureSimpleSubscription(newItem.id, simpleOptions)
+    return
+  }
 
   // If the new profile will become the current profile, ensure generateProfile is called
   // to prepare working directory before restarting core
@@ -246,7 +278,14 @@ export async function removeProfileItem(id: string): Promise<void> {
     mainWindow?.webContents.send('pluginConfigUpdated')
     return
   }
-  await removeProfileItemCore(id)
+  await withProfileRemoval(id, () => removeProfileItemCore(id))
+}
+
+export function withProfileRemoval<T>(id: string, remove: () => Promise<T>): Promise<T> {
+  if (!id || !existsSync(simpleConfigPath())) return remove()
+  return import('../simple/service').then(({ withSimpleProfileRemoval }) =>
+    withSimpleProfileRemoval(id, remove)
+  )
 }
 
 // 正在删除中的 profile：并发删除时不能把彼此选作新的 current
@@ -451,7 +490,7 @@ async function fetchAndValidateSubscription(options: FetchOptions): Promise<Fetc
 
   const decryptedData = await decryptAgeContent(data, options.ageSecretKey, 'subscription')
   const parsed = parse(decryptedData) as Record<string, unknown> | null
-  if (typeof parsed !== 'object' || parsed === null) {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     await profileLogger.warn(
       `Remote profile parse failed url=${redactedUrl} mode=${fetchMode} parsedType=${typeof parsed}`
     )
@@ -460,13 +499,14 @@ async function fetchAndValidateSubscription(options: FetchOptions): Promise<Fetc
   await profileLogger.info(
     `Remote profile parsed url=${redactedUrl} mode=${fetchMode} summary=${parsedProfileSummary(parsed)}`
   )
-  if (!parsed['proxies'] && !parsed['proxy-providers']) {
+  const hasProxyGroups = Array.isArray(parsed['proxy-groups']) && parsed['proxy-groups'].length > 0
+  if (!parsed['proxies'] && !parsed['proxy-providers'] && !hasProxyGroups) {
     await profileLogger.warn(
-      `Remote profile validation failed url=${redactedUrl} mode=${fetchMode} reason=missing-proxies-or-providers summary=${parsedProfileSummary(
+      `Remote profile validation failed url=${redactedUrl} mode=${fetchMode} reason=missing-proxies-providers-or-groups summary=${parsedProfileSummary(
         parsed
       )}`
     )
-    throw new Error('Subscription failed: Profile missing proxies or providers')
+    throw new Error('Subscription failed: Profile missing proxies, providers or proxy groups')
   }
 
   return { data, headers: responseHeaders }
@@ -606,8 +646,34 @@ export async function validateProfileCandidate(
   const candidatePath = join(candidateDir, 'config.yaml')
 
   try {
-    const { core = 'mihomo' } = await getAppConfig()
+    const { core = 'mihomo', operationMode } = await getAppConfig()
     const baseProfile = await parseProfileContent(item.id, content, item.ageSecretKey)
+    if (operationMode === 'simple') {
+      const [{ compileSimpleConfig }, { resolveSimpleDraft }, { getSimpleState }] =
+        await Promise.all([
+          import('../simple/compiler'),
+          import('../simple/subscriptions'),
+          import('../simple/store')
+        ])
+      const state = await getSimpleState()
+      const draft = await resolveSimpleDraft(state.published, { item, config: baseProfile })
+      // Validate the subscription's nodes even before its first simple-mode import.
+      if (!draft.sources.some((source) => source.profileId === item.id && source.mode !== 'http')) {
+        draft.sources.push({
+          id: `candidate-${item.id}`,
+          name: `candidate-${item.id}`,
+          mode: 'inline',
+          prefix: '',
+          interval: 0,
+          proxies: (baseProfile?.proxies || []) as Record<string, unknown>[]
+        })
+      }
+      const result = compileSimpleConfig(draft, await getControledMihomoConfig())
+      if (result.errors.length) throw new Error(result.errors.join('\n'))
+      await atomicWriteFile(candidatePath, result.yaml, { encoding: 'utf8' })
+      await checkProfileConfig(candidatePath, core, undefined, opts)
+      return
+    }
     await generateProfile(undefined, {
       profileId: item.id,
       baseProfile,
@@ -634,6 +700,31 @@ export async function getProfileStr(id: string | undefined): Promise<string> {
 export async function setProfileStr(id: string, content: string): Promise<void> {
   // 读取最新的配置
   const { current } = await getProfileConfig(true)
+  if ((await getAppConfig()).operationMode === 'simple') {
+    const { getSimpleState } = await import('../simple/store')
+    const state = await getSimpleState()
+    const linked = state.published.sources.some((source) => source.profileId === id)
+    const item = await getProfileItem(id)
+    if (linked && item) {
+      await validateProfileCandidate(item, content)
+      const previous = await getProfileStr(id)
+      await atomicWriteFile(profilePath(id), content, { encoding: 'utf8' })
+      try {
+        await mihomoHotReloadConfig()
+      } catch (error) {
+        await atomicWriteFile(profilePath(id), previous, { encoding: 'utf8' })
+        try {
+          await mihomoHotReloadConfig()
+        } catch (restoreError) {
+          profileLogger.error('Failed to restore simple subscription config', restoreError)
+        }
+        throw error
+      }
+      return
+    }
+    await atomicWriteFile(profilePath(id), content, { encoding: 'utf8' })
+    return
+  }
   await atomicWriteFile(profilePath(id), content, { encoding: 'utf8' })
   if (current === id) await reloadCurrentProfile()
 }

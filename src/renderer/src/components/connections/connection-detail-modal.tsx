@@ -14,8 +14,13 @@ import React from 'react'
 import { calcTraffic } from '@renderer/utils/calc'
 import dayjs from '@renderer/utils/dayjs'
 import { BiCopy } from 'react-icons/bi'
+import { IoAdd } from 'react-icons/io5'
 import { useTranslation } from 'react-i18next'
+import { useAppConfig } from '@renderer/hooks/use-app-config'
+import { getSimpleRulesEditor } from '@renderer/utils/ipc'
 import SettingItem from '../base/base-setting-item'
+import type { SimpleRuleEditor } from '../../../../shared/simple-config'
+import RuleEditorModal from '../rules/rule-editor-modal'
 
 interface Props {
   connection: IMihomoConnectionDetail
@@ -29,6 +34,9 @@ const CopyableSettingItem: React.FC<{
   prefix?: string[]
 }> = ({ title, value, displayName, prefix = [] }) => {
   const { t } = useTranslation()
+  const { appConfig } = useAppConfig()
+  const [ruleEditor, setRuleEditor] = React.useState<SimpleRuleEditor>()
+  const [ruleValue, setRuleValue] = React.useState<string>()
   const getSubDomains = (domain: string): string[] =>
     domain.split('.').length <= 2
       ? [domain]
@@ -95,35 +103,91 @@ const CopyableSettingItem: React.FC<{
           })
           .flat())
   ]
+  const validMenuItems = menuItems.filter(
+    (item): item is { key: string; text: string } => item !== null
+  )
+
+  const openRuleEditor = async (key: string): Promise<void> => {
+    try {
+      setRuleEditor(await getSimpleRulesEditor())
+      setRuleValue(`${key},DIRECT`)
+    } catch (error) {
+      console.error('[Connections] failed to load simple rules', error)
+    }
+  }
 
   return (
-    <SettingItem
-      title={title}
-      actions={
-        <Dropdown>
-          <DropdownTrigger>
-            <Button title={t('connections.detail.copyRule')} isIconOnly size="sm" variant="light">
-              <BiCopy className="text-lg" />
-            </Button>
-          </DropdownTrigger>
-          <DropdownMenu
-            onAction={(key) =>
-              navigator.clipboard.writeText(
-                key === 'raw' ? (Array.isArray(value) ? value.join(', ') : value) : (key as string)
-              )
-            }
-          >
-            {menuItems
-              .filter((item) => item !== null)
-              .map(({ key, text }) => (
-                <DropdownItem key={key}>{text}</DropdownItem>
-              ))}
-          </DropdownMenu>
-        </Dropdown>
-      }
-    >
-      {displayName || (Array.isArray(value) ? value.join(', ') : value)}
-    </SettingItem>
+    <>
+      <SettingItem
+        title={
+          <span className="inline-flex h-full w-[88px] shrink-0 items-center whitespace-nowrap">
+            {title}
+          </span>
+        }
+        actions={
+          <Dropdown>
+            <DropdownTrigger>
+              <Button
+                title={
+                  appConfig?.operationMode === 'simple'
+                    ? t('connections.detail.addRule')
+                    : t('connections.detail.copyRule')
+                }
+                isIconOnly
+                size="sm"
+                variant="light"
+                className="h-8 w-8 min-w-8 p-0"
+              >
+                {appConfig?.operationMode === 'simple' ? (
+                  <IoAdd className="text-lg" />
+                ) : (
+                  <BiCopy className="text-lg" />
+                )}
+              </Button>
+            </DropdownTrigger>
+            <DropdownMenu
+              onAction={(key) => {
+                if (appConfig?.operationMode === 'simple') void openRuleEditor(key as string)
+                else
+                  void navigator.clipboard.writeText(
+                    key === 'raw'
+                      ? Array.isArray(value)
+                        ? value.join(', ')
+                        : value
+                      : (key as string)
+                  )
+              }}
+            >
+              {validMenuItems
+                .filter((item) => appConfig?.operationMode !== 'simple' || item.key !== 'raw')
+                .map(({ key, text }) => (
+                  <DropdownItem key={key}>{text}</DropdownItem>
+                ))}
+            </DropdownMenu>
+          </Dropdown>
+        }
+      >
+        <span
+          className="min-w-0 flex-1 truncate text-right"
+          title={displayName || (Array.isArray(value) ? value.join(', ') : value)}
+        >
+          {displayName || (Array.isArray(value) ? value.join(', ') : value)}
+        </span>
+      </SettingItem>
+      {ruleEditor && ruleValue && (
+        <RuleEditorModal
+          index={null}
+          insertAt={0}
+          initialValue={ruleValue}
+          data={ruleEditor}
+          onClose={() => {
+            setRuleEditor(undefined)
+            setRuleValue(undefined)
+          }}
+          onSaved={() => undefined}
+        />
+      )}
+    </>
   )
 }
 

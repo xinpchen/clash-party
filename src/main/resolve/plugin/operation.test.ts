@@ -14,6 +14,7 @@ vi.mock('./vault', () => ({
   )
 }))
 
+import { KeyedWriteQueue } from '../../utils/safeFile'
 import { CPX_GUARD_REFUSED, CPX_REDIRECT_REFUSED, CPX_TIMEOUT, codedError } from './errors'
 import {
   createBudget,
@@ -25,7 +26,6 @@ import {
   type OperationContext
 } from './operation'
 import { abortable, autoRouteProvider, singleRouteProvider, type RouteProvider } from './route'
-import { KeyedWriteQueue } from '../../utils/safeFile'
 
 const ITEM: IPluginItem = {
   id: 'p1',

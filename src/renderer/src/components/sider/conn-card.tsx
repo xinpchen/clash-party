@@ -1,6 +1,6 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter } from '@heroui/react'
 import { FaCircleArrowDown, FaCircleArrowUp } from 'react-icons/fa6'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { calcTraffic } from '@renderer/utils/calc'
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
@@ -22,15 +22,17 @@ import {
   ScriptableContext
 } from 'chart.js'
 import { useTranslation } from 'react-i18next'
+import SiderItem from './sider-item'
 
 // 注册 Chart.js 组件
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler)
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 const ConnCard: React.FC<Props> = (props) => {
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const { appConfig } = useAppConfig()
   const { controledMihomoConfig } = useControledMihomoConfig()
   const {
@@ -38,12 +40,12 @@ const ConnCard: React.FC<Props> = (props) => {
     connectionCardStatus = 'col-span-2',
     disableAnimations = false,
     hideConnectionCardWave = false,
-    disableTrayIconColor = false
+    disableTrayIconColor = false,
+    trayTrafficTextColor = 'auto'
   } = appConfig || {}
   const sysProxyEnabled = appConfig?.sysProxy?.enable
   const tunEnabled = controledMihomoConfig?.tun?.enable
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/connections')
   const { t } = useTranslation()
 
@@ -210,25 +212,17 @@ const ConnCard: React.FC<Props> = (props) => {
     return (): void => {
       cancelled = true
     }
-  }, [showTraffic, sysProxyEnabled, tunEnabled, disableTrayIconColor])
+  }, [showTraffic, sysProxyEnabled, tunEnabled, disableTrayIconColor, trayTrafficTextColor])
 
   if (iconOnly) {
     return (
-      <div className={`${connectionCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.connections')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/connections')
-            }}
-          >
-            <IoLink className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={connectionCardStatus}
+        title={t('sider.cards.connections')}
+        route="/connections"
+        icon={<IoLink className="text-[20px]" />}
+        expanded={expanded}
+      />
     )
   }
 

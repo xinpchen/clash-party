@@ -15,7 +15,7 @@ const Sniffer: React.FC = () => {
   const { t } = useTranslation()
   const { controledMihomoConfig, patchControledMihomoConfig } = useControledMihomoConfig()
   const { appConfig } = useAppConfig()
-  const { controlSniff = DEFAULT_CONTROL_SNIFF } = appConfig || {}
+  const { controlSniff = DEFAULT_CONTROL_SNIFF, operationMode = 'standard' } = appConfig || {}
   const { sniffer } = controledMihomoConfig || {}
   const {
     enable = DEFAULT_MIHOMO_SNIFFER_CONFIG.enable,
@@ -53,7 +53,7 @@ const Sniffer: React.FC = () => {
       setChanged(false)
       await patchControledMihomoConfig(patch)
 
-      if (controlSniff) {
+      if (operationMode !== 'simple' && controlSniff) {
         await mihomoHotReloadConfig()
       }
     } catch (e) {
@@ -139,21 +139,23 @@ const Sniffer: React.FC = () => {
               })
             }
           >
-            {controlSniff ? t('common.save') : t('sniffer.saveOnly')}
+            {operationMode === 'simple' || controlSniff ? t('common.save') : t('sniffer.saveOnly')}
           </Button>
         )
       }
     >
       <SettingCard>
-        <SettingItem title={t('sniffer.enable')} divider>
-          <Switch
-            size="sm"
-            isSelected={values.enable}
-            onValueChange={(v) => {
-              setValues({ ...values, enable: v })
-            }}
-          />
-        </SettingItem>
+        {operationMode !== 'simple' && (
+          <SettingItem title={t('sniffer.enable')} divider>
+            <Switch
+              size="sm"
+              isSelected={values.enable}
+              onValueChange={(v) => {
+                setValues({ ...values, enable: v })
+              }}
+            />
+          </SettingItem>
+        )}
         <SettingItem title={t('sniffer.overrideDestination')} divider>
           <Switch
             size="sm"

@@ -1,23 +1,24 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter } from '@heroui/react'
 import { IoGlobeOutline } from 'react-icons/io5'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const IPCard: React.FC<Props> = (props) => {
   const { t } = useTranslation()
   const { appConfig } = useAppConfig()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const { networkCardStatus = 'col-span-1', disableAnimations = false } = appConfig || {}
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/network')
   const {
     attributes,
@@ -33,21 +34,13 @@ const IPCard: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${networkCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.network')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/network')
-            }}
-          >
-            <IoGlobeOutline className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={networkCardStatus}
+        title={t('sider.cards.network')}
+        route="/network"
+        icon={<IoGlobeOutline className="text-[20px]" />}
+        expanded={expanded}
+      />
     )
   }
 

@@ -1,5 +1,5 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Button, Card, CardBody, CardFooter } from '@heroui/react'
+import { useLocation } from 'react-router-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
@@ -7,22 +7,23 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { DEFAULT_USE_SUB_STORE } from '../../../../shared/appConfig'
 import SubStoreIcon from '../base/substore-icon'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const SubStoreCard: React.FC<Props> = (props) => {
   const { t } = useTranslation()
   const { appConfig } = useAppConfig()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const {
     substoreCardStatus = 'col-span-1',
     useSubStore = DEFAULT_USE_SUB_STORE,
     disableAnimations = false
   } = appConfig || {}
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/substore')
   const {
     attributes,
@@ -38,21 +39,13 @@ const SubStoreCard: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${substoreCardStatus} ${!useSubStore ? 'hidden' : ''} flex justify-center`}>
-        <Tooltip content={t('sider.cards.substore')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/substore')
-            }}
-          >
-            <SubStoreIcon className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={substoreCardStatus}
+        title={t('sider.cards.substore')}
+        route="/substore"
+        icon={<SubStoreIcon className="text-[20px]" />}
+        expanded={expanded}
+      />
     )
   }
 

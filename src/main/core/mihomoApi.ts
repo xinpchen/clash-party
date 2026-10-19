@@ -236,9 +236,21 @@ export const mihomoCloseConnection = async (id: string): Promise<void> => {
   return await instance.delete(`/connections/${encodeURIComponent(id)}`)
 }
 
-export const mihomoCloseAllConnections = async (): Promise<void> => {
+export const mihomoCloseAllConnections = async (group?: string): Promise<void> => {
   const instance = await getAxios()
-  return await instance.delete('/connections')
+  if (!group) {
+    return await instance.delete('/connections')
+  }
+
+  const connections = await instance.get<never, IMihomoConnectionsInfo>('/connections')
+  const targets = (connections.connections || []).filter(({ chains }) => chains.includes(group))
+  for (let i = 0; i < targets.length; i += 20) {
+    await Promise.all(
+      targets
+        .slice(i, i + 20)
+        .map(({ id }) => instance.delete(`/connections/${encodeURIComponent(id)}`))
+    )
+  }
 }
 
 export const mihomoRules = async (): Promise<IMihomoRulesInfo> => {
@@ -440,7 +452,8 @@ export const mihomoHotReloadConfig = async (): Promise<void> => {
   // 否则界面上改动的 Smart 选项会沿用旧脚本，要等到下次重启内核才生效
   await manageSmartOverride()
   const { profileId: current, dnsGuard } = await generateProfile()
-  const { diffWorkDir = false } = await getAppConfig()
+  const appConfig = await getAppConfig()
+  const diffWorkDir = appConfig.operationMode === 'simple' ? false : appConfig.diffWorkDir === true
   const configPath = diffWorkDir ? mihomoWorkConfigPath(current) : mihomoWorkConfigPath('work')
   mihomoApiLogger.info(`hot reload config path: ${configPath}`)
   const instance = await getAxios()

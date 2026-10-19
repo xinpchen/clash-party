@@ -14,12 +14,17 @@ import dayjs from '@renderer/utils/dayjs'
 import { calcTraffic } from '@renderer/utils/calc'
 import { getHash } from '@renderer/utils/hash'
 import { useTranslation } from 'react-i18next'
+import { useAppConfig } from '@renderer/hooks/use-app-config'
+import { FaPlus } from 'react-icons/fa6'
+import SimpleProviderModal from '../simple/simple-provider-modal'
 import SettingItem from '../base/base-setting-item'
 import SettingCard from '../base/base-setting-card'
 import QrCodeModal from '../profiles/qr-code-modal'
 import Viewer from './viewer'
 const ProxyProvider: React.FC = () => {
   const { t } = useTranslation()
+  const { appConfig } = useAppConfig()
+  const simpleMode = appConfig?.operationMode === 'simple'
   const [showDetails, setShowDetails] = useState({
     show: false,
     path: '',
@@ -28,6 +33,8 @@ const ProxyProvider: React.FC = () => {
     privderType: ''
   })
   const [qrCode, setQrCode] = useState<{ name: string; url: string } | null>(null)
+  const [editorName, setEditorName] = useState<string | undefined>()
+  const [editorOpen, setEditorOpen] = useState(false)
   useEffect(() => {
     if (showDetails.title) {
       const fetchProviderPath = async (name: string): Promise<void> => {
@@ -79,7 +86,7 @@ const ProxyProvider: React.FC = () => {
     }
   }
 
-  if (!providers.length) {
+  if (!providers.length && !simpleMode) {
     return null
   }
 
@@ -97,6 +104,14 @@ const ProxyProvider: React.FC = () => {
 
   return (
     <SettingCard>
+      {editorOpen && (
+        <SimpleProviderModal
+          kind="proxy-providers"
+          name={editorName}
+          onClose={() => setEditorOpen(false)}
+          onSaved={() => mutate()}
+        />
+      )}
       {qrCode && (
         <QrCodeModal title={qrCode.name} url={qrCode.url} onClose={() => setQrCode(null)} />
       )}
@@ -112,17 +127,47 @@ const ProxyProvider: React.FC = () => {
         />
       )}
       <SettingItem title={t('resources.proxyProviders.title')} divider>
-        <Button
-          size="sm"
-          color="primary"
-          onPress={() => {
-            providers.forEach((provider, index) => {
-              onUpdate(provider.name, index)
-            })
-          }}
-        >
-          {t('resources.proxyProviders.updateAll')}
-        </Button>
+        <div className="flex items-center gap-2">
+          {simpleMode && (
+            <>
+              <Button
+                size="sm"
+                variant="flat"
+                startContent={<FaPlus />}
+                onPress={() => {
+                  setEditorName(undefined)
+                  setEditorOpen(true)
+                }}
+              >
+                添加
+              </Button>
+              <Button
+                size="sm"
+                variant="flat"
+                startContent={<MdEditDocument />}
+                isDisabled={!providers.length}
+                onPress={() => {
+                  setEditorName(providers[0]?.name)
+                  setEditorOpen(true)
+                }}
+              >
+                编辑
+              </Button>
+            </>
+          )}
+          <Button
+            size="sm"
+            color="primary"
+            isDisabled={!providers.length}
+            onPress={() => {
+              providers.forEach((provider, index) => {
+                onUpdate(provider.name, index)
+              })
+            }}
+          >
+            {t('resources.proxyProviders.updateAll')}
+          </Button>
+        </div>
       </SettingItem>
       {providers.map((provider, index) => (
         <Fragment key={provider.name}>
@@ -158,13 +203,18 @@ const ProxyProvider: React.FC = () => {
                 className="ml-2"
                 size="sm"
                 onPress={() => {
-                  setShowDetails({
-                    show: false,
-                    privderType: 'proxy-providers',
-                    path: provider.name,
-                    type: provider.vehicleType,
-                    title: provider.name
-                  })
+                  if (simpleMode) {
+                    setEditorName(provider.name)
+                    setEditorOpen(true)
+                  } else {
+                    setShowDetails({
+                      show: false,
+                      privderType: 'proxy-providers',
+                      path: provider.name,
+                      type: provider.vehicleType,
+                      title: provider.name
+                    })
+                  }
                 }}
               >
                 {provider.vehicleType === 'File' ? (
@@ -186,7 +236,7 @@ const ProxyProvider: React.FC = () => {
               </Button>
             </div>
           </SettingItem>
-          {provider.subscriptionInfo && (
+          {!simpleMode && provider.subscriptionInfo && (
             <SettingItem
               divider={index !== providers.length - 1}
               title={

@@ -30,7 +30,12 @@ export const GroupsProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const handler = (): void => {
       mutate()
     }
-    return window.electron.ipcRenderer.on('groupsUpdated', handler)
+    const unsubscribeGroups = window.electron.ipcRenderer.on('groupsUpdated', handler)
+    const unsubscribeCoreStarted = window.electron.ipcRenderer.on('core-started', handler)
+    return () => {
+      unsubscribeGroups()
+      unsubscribeCoreStarted()
+    }
   }, [mutate])
 
   return (

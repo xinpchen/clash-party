@@ -161,7 +161,10 @@ async function activateAppBeforeShow(): Promise<void> {
 
 // 窗口在 renderer 首屏内容（路由 + 侧边栏）就绪后再显示，避免 lazy chunk 未加载完就展示空白主区。
 function waitForInitialContent(window: BrowserWindow): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>()
+  let resolvePromise!: () => void
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve
+  })
   const { webContents } = window
   let finished = false
   const finish = (): void => {
@@ -170,7 +173,7 @@ function waitForInitialContent(window: BrowserWindow): Promise<void> {
     clearTimeout(timeout)
     webContents.off('ipc-message', onIpcMessage)
     window.off('closed', onClosed)
-    resolve()
+    resolvePromise()
   }
   const onIpcMessage = (_event: IpcMainEvent, channel: string): void => {
     if (channel === 'rendererFirstContentReady') finish()

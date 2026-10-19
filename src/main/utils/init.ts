@@ -26,6 +26,7 @@ import {
   DEFAULT_MIHOMO_SKIP_AUTH_PREFIXES,
   getDefaultMihomoTunDevice
 } from '../../shared/appConfig'
+import { defaultSimpleDraft } from '../../shared/simple-config'
 import { stringify } from './yaml'
 import {
   defaultConfig,
@@ -49,7 +50,8 @@ import {
   resourcesFilesDir,
   rulesDir,
   subStoreDir,
-  themesDir
+  themesDir,
+  simpleConfigPath
 } from './dirs'
 import { initLogger } from './logger'
 import { atomicWriteFile } from './safeFile'
@@ -145,6 +147,16 @@ async function initConfig(): Promise<void> {
       path: controledMihomoConfigPath(),
       content: defaultControledMihomoConfig,
       name: 'mihomo config'
+    },
+    {
+      path: simpleConfigPath(),
+      content: {
+        version: 2,
+        revision: 0,
+        draft: defaultSimpleDraft(),
+        published: defaultSimpleDraft()
+      },
+      name: 'simple config'
     }
   ]
 
@@ -370,6 +382,7 @@ async function migrateRemovePassword(): Promise<void> {
 // 迁移：mihomo 配置默认值
 async function migrateMihomoConfig(): Promise<void> {
   const config = await getControledMihomoConfig()
+  const appConfig = await getAppConfig()
   const patches: Partial<IMihomoConfig> = {}
 
   // skip-auth-prefixes
@@ -400,10 +413,13 @@ async function migrateMihomoConfig(): Promise<void> {
     }
   }
 
-  // 移除废弃配置
-  if (config['external-controller-unix']) patches['external-controller-unix'] = undefined
-  if (config['external-controller-pipe']) patches['external-controller-pipe'] = undefined
-  if (config['external-controller'] === undefined) patches['external-controller'] = ''
+  // 标准模式清理旧的控制器字段；简易模式的 general 模块保留这些字段原样生成。
+  if (appConfig.operationMode !== 'simple') {
+    // 移除废弃配置
+    if (config['external-controller-unix']) patches['external-controller-unix'] = undefined
+    if (config['external-controller-pipe']) patches['external-controller-pipe'] = undefined
+    if (config['external-controller'] === undefined) patches['external-controller'] = ''
+  }
 
   if (Object.keys(patches).length > 0) {
     await patchControledMihomoConfig(patches)

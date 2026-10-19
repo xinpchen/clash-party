@@ -338,6 +338,13 @@ app
         return
       }
 
+      // 首次启动必须先由 renderer 完成模式选择，避免在选择前生成标准配置。
+      if (!appConfig.modeSelected) {
+        mainLogger.info('Core startup is waiting for the initial operation mode selection')
+        completeCoreInitialization(true)
+        return
+      }
+
       try {
         initCoreWatcher()
         const startPromises = await startCoreForStartup()

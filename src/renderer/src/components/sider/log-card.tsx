@@ -1,23 +1,24 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter } from '@heroui/react'
 import { IoJournalOutline } from 'react-icons/io5'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const LogCard: React.FC<Props> = (props) => {
   const { t } = useTranslation()
   const { appConfig } = useAppConfig()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const { logCardStatus = 'col-span-1', disableAnimations = false } = appConfig || {}
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/logs')
   const {
     attributes,
@@ -33,23 +34,16 @@ const LogCard: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${logCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.logs')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/logs')
-            }}
-          >
-            <IoJournalOutline className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={logCardStatus}
+        title={t('sider.cards.logs')}
+        route="/logs"
+        icon={<IoJournalOutline className="text-[20px]" />}
+        expanded={expanded}
+      />
     )
   }
+
   return (
     <div
       style={{

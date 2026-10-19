@@ -22,7 +22,9 @@ const DNS: React.FC = () => {
   const {
     nameserverPolicy,
     useNameserverPolicy = DEFAULT_USE_NAMESERVER_POLICY,
-    controlDns = DEFAULT_CONTROL_DNS
+    controlDns = DEFAULT_CONTROL_DNS,
+    disableDnsOverrideGuard = false,
+    operationMode = 'standard'
   } = appConfig || {}
   const { dns, hosts } = controledMihomoConfig || {}
   const {
@@ -44,6 +46,14 @@ const DNS: React.FC = () => {
     fallback = DEFAULT_MIHOMO_DNS_CONFIG.fallback,
     'fallback-filter': fallbackFilter = DEFAULT_MIHOMO_DNS_CONFIG['fallback-filter']
   } = dns || {}
+  const simpleNameserverPolicy = (dns?.['nameserver-policy'] ||
+    {}) as IAppConfig['nameserverPolicy']
+  const effectiveNameserverPolicy =
+    operationMode === 'simple' ? simpleNameserverPolicy : nameserverPolicy
+  const effectiveUseNameserverPolicy =
+    operationMode === 'simple'
+      ? Object.keys(simpleNameserverPolicy).length > 0
+      : useNameserverPolicy
   const [changed, setChanged] = useState(false)
   const [values, originSetValues] = useState({
     enable,
@@ -71,8 +81,8 @@ const DNS: React.FC = () => {
       fallbackFilter?.ipcidr || DEFAULT_MIHOMO_DNS_CONFIG['fallback-filter']?.ipcidr || [],
     fallbackDomain:
       fallbackFilter?.domain || DEFAULT_MIHOMO_DNS_CONFIG['fallback-filter']?.domain || [],
-    useNameserverPolicy,
-    nameserverPolicy: Object.entries(nameserverPolicy || {}).map(([domain, value]) => ({
+    useNameserverPolicy: effectiveUseNameserverPolicy,
+    nameserverPolicy: Object.entries(effectiveNameserverPolicy || {}).map(([domain, value]) => ({
       domain,
       value
     })),
@@ -156,17 +166,19 @@ const DNS: React.FC = () => {
 
   const onSave = async (patch: Partial<IMihomoConfig>): Promise<void> => {
     const nextNameserverPolicy = getNameserverPolicy()
-    await patchAppConfig({
-      nameserverPolicy: nextNameserverPolicy,
-      useNameserverPolicy: values.useNameserverPolicy
-    })
+    if (operationMode !== 'simple') {
+      await patchAppConfig({
+        nameserverPolicy: nextNameserverPolicy,
+        useNameserverPolicy: values.useNameserverPolicy
+      })
+    }
     try {
       setChanged(false)
       await patchControledMihomoConfig({
         ...patch,
         dns: patch.dns ? { ...patch.dns, 'nameserver-policy': nextNameserverPolicy } : patch.dns
       })
-      if (controlDns) {
+      if (operationMode !== 'simple' && controlDns) {
         await mihomoHotReloadConfig()
       }
     } catch (e) {
@@ -220,21 +232,34 @@ const DNS: React.FC = () => {
               onSave(result)
             }}
           >
-            {controlDns ? t('common.save') : t('dns.saveOnly')}
+            {operationMode === 'simple' || controlDns ? t('common.save') : t('dns.saveOnly')}
           </Button>
         )
       }
     >
       <SettingCard>
-        <SettingItem title={t('dns.enable')} divider>
-          <Switch
-            size="sm"
-            isSelected={values.enable}
-            onValueChange={(v) => {
-              setValues({ ...values, enable: v })
-            }}
-          />
-        </SettingItem>
+        {operationMode !== 'simple' && (
+          <SettingItem title={t('dns.enable')} divider>
+            <Switch
+              size="sm"
+              isSelected={values.enable}
+              onValueChange={(v) => {
+                setValues({ ...values, enable: v })
+              }}
+            />
+          </SettingItem>
+        )}
+        {operationMode !== 'simple' && (
+          <SettingItem title={t('dns.overrideGuard.disable')} divider>
+            <Switch
+              size="sm"
+              isSelected={disableDnsOverrideGuard}
+              onValueChange={(v) => {
+                void patchAppConfig({ disableDnsOverrideGuard: v })
+              }}
+            />
+          </SettingItem>
+        )}
         <SettingItem title={t('dns.enhancedMode.title')} divider>
           <Tabs
             size="sm"

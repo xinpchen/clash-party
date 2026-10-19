@@ -35,6 +35,11 @@ export async function getAppConfig(force = false): Promise<IAppConfig> {
       const data = await readFile(appConfigPath(), 'utf-8')
       const parsedConfig = parse(data)
       const mergedConfig = deepMerge(cloneDefaultConfig(), parsedConfig || {})
+      // 配置文件已存在且来自旧版本时，沿用标准模式；只有新建配置保留首次选择门控。
+      if (parsedConfig && typeof parsedConfig === 'object' && !('modeSelected' in parsedConfig)) {
+        mergedConfig.modeSelected = true
+        mergedConfig.operationMode = 'standard'
+      }
       mergedConfig.maxLogFileSize = normalizeMaxLogFileSizeMB(mergedConfig.maxLogFileSize)
       if (JSON.stringify(mergedConfig) !== JSON.stringify(parsedConfig)) {
         await atomicWriteFile(appConfigPath(), stringify(mergedConfig))

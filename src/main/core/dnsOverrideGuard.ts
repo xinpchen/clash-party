@@ -81,10 +81,19 @@ export function evaluateDnsOverrideGuard(
   profileId: string,
   profile: unknown,
   controlDns: boolean,
-  runtime: boolean
+  runtime: boolean,
+  guardEnabled = true
 ): DnsOverrideGuardResult {
   const fields = detectProfileDns(profile)
   const fingerprint = fields ? profileDnsFingerprint(profileId, fields) : null
+  if (!guardEnabled) {
+    return {
+      controlDns,
+      autoDisabled: false,
+      fingerprint,
+      request: runtime ? pendingRequest : null
+    }
+  }
   if (runtime && confirmedFingerprint !== null && confirmedFingerprint !== fingerprint) {
     confirmedFingerprint = null
   }
@@ -168,10 +177,16 @@ export async function setControlDns(
   enabled: boolean,
   confirmation?: string
 ): Promise<IControlDnsApplyResult> {
+  const { disableDnsOverrideGuard = false } = await getAppConfig()
   let request: ControlDnsRequest
   if (enabled) {
     const source = await inspectCurrentProfileDns()
-    if (source !== null && confirmedFingerprint !== source && confirmation !== source) {
+    if (
+      !disableDnsOverrideGuard &&
+      source !== null &&
+      confirmedFingerprint !== source &&
+      confirmation !== source
+    ) {
       return { status: 'confirm-required', confirmation: source }
     }
     request = { controlDns: true, confirmation: source }

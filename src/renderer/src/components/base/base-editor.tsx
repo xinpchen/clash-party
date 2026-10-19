@@ -105,13 +105,7 @@ export const BaseEditor: React.FC<Props> = (props) => {
   }
 
   useEffect(() => {
-    window.onresize = (): void => {
-      setTimeout(() => {
-        editorRef.current?.layout()
-      }, 0)
-    }
     return (): void => {
-      window.onresize = null
       editorRef.current?.dispose()
       editorRef.current = undefined
       modelRef.current?.dispose()
@@ -126,6 +120,7 @@ export const BaseEditor: React.FC<Props> = (props) => {
       height="100%"
       theme={trueTheme?.includes('light') ? 'vs' : 'vs-dark'}
       options={{
+        automaticLayout: true,
         tabSize: ['yaml', 'javascript', 'json'].includes(language) ? 2 : 4, // 根据语言类型设置缩进大小
         minimap: {
           enabled: document.documentElement.clientWidth >= 1500 // 超过一定宽度显示 minimap 滚动条

@@ -17,6 +17,7 @@ import {
 } from '../../shared/appConfig'
 
 export const defaultConfig: IAppConfig = {
+  modeSelected: false,
   core: 'mihomo',
   enableSmartCore: false,
   enableSmartOverride: true,
@@ -30,6 +31,7 @@ export const defaultConfig: IAppConfig = {
   enableTrafficLogger: DEFAULT_ENABLE_TRAFFIC_LOGGER,
   trayProxyGroupStyle: 'default',
   disableTrayIconColor: false,
+  trayTrafficTextColor: 'auto',
   customTrayIcon: '',
   customTrayIcons: {},
   maxLogDays: 7,
@@ -49,6 +51,7 @@ export const defaultConfig: IAppConfig = {
   autoUpdateProfileOnStart: true,
   silentUpdate: true,
   autoCloseConnection: true,
+  autoCloseConnectionOnlyGroup: false,
   subscriptionTimeout: 30000,
   gistAgeEncrypt: false,
   gistAgeRecipient: '',
@@ -57,6 +60,7 @@ export const defaultConfig: IAppConfig = {
   networkInfoCardOrder: DEFAULT_NETWORK_INFO_CARD_ORDER,
   useNameserverPolicy: DEFAULT_USE_NAMESERVER_POLICY,
   controlDns: DEFAULT_CONTROL_DNS,
+  disableDnsOverrideGuard: false,
   controlSniff: DEFAULT_CONTROL_SNIFF,
   floatingWindowCompatMode: true,
   disableHardwareAcceleration: false,

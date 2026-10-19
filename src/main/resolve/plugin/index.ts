@@ -10,6 +10,7 @@ import {
 import {
   upsertPluginProfile,
   removePluginProfileContent,
+  withProfileRemoval,
   isPluginProfileInvalidError,
   syncPluginProfileSchedule
 } from '../../config/profile'
@@ -1055,25 +1056,30 @@ async function removePluginLocked(
 
 // 删除入口的唯一预算只约束网络（revoke，耗尽即跳过）；锁等待与本地清理必须完成，不接收 signal（§0.5）。
 export async function removePlugin(id: string): Promise<void> {
-  markPluginRemoved(id)
-  const budget = createBudget(DEFAULT_BUDGET_MS)
-  try {
-    await withPluginLock(id, () => removePluginLocked(id, undefined, budget))
-  } finally {
-    budget.dispose()
-  }
+  const record = await getPluginItem(id)
+  await withProfileRemoval(record?.profileId || '', async () => {
+    markPluginRemoved(id)
+    const budget = createBudget(DEFAULT_BUDGET_MS)
+    try {
+      await withPluginLock(id, () => removePluginLocked(id, undefined, budget))
+    } finally {
+      budget.dispose()
+    }
+  })
   notifyRenderer()
 }
 
 // profiles 列表删除的级联入口：profile.ts 只做判定，记录、文件与插件侧都在这里的临界区内删除。
 export async function removePluginForProfile(id: string, profileId: string): Promise<void> {
-  markPluginRemoved(id)
-  const budget = createBudget(DEFAULT_BUDGET_MS)
-  try {
-    await withPluginLock(id, () => removePluginLocked(id, profileId, budget))
-  } finally {
-    budget.dispose()
-  }
+  await withProfileRemoval(profileId, async () => {
+    markPluginRemoved(id)
+    const budget = createBudget(DEFAULT_BUDGET_MS)
+    try {
+      await withPluginLock(id, () => removePluginLocked(id, profileId, budget))
+    } finally {
+      budget.dispose()
+    }
+  })
 }
 
 // 渲染层可编辑的字段白名单（IPC 边界）：信任根（providerPubKey）、发现标记（seq/digest）、loginUrl /

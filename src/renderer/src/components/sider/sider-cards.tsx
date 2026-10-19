@@ -31,7 +31,7 @@ import { mergeSiderOrder, SIDER_CARD_ROUTES } from '@renderer/utils/sider'
 import { markInitialContentPartReady } from '@renderer/utils/startup'
 import { DEFAULT_SIDER_ORDER } from '../../../../shared/appConfig'
 
-const componentMap: Record<SiderCardKey, React.FC<{ iconOnly?: boolean }>> = {
+const componentMap: Record<SiderCardKey, React.FC<{ iconOnly?: boolean; expanded?: boolean }>> = {
   sysproxy: SysproxySwitcher,
   tun: TunSwitcher,
   profile: ProfileCard,
@@ -51,10 +51,11 @@ const componentMap: Record<SiderCardKey, React.FC<{ iconOnly?: boolean }>> = {
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const SiderCards = (props: Props): React.JSX.Element => {
-  const { iconOnly = false } = props
+  const { iconOnly = false, expanded = false } = props
   const { appConfig, patchAppConfig } = useAppConfig()
   const siderOrder = appConfig?.siderOrder ?? DEFAULT_SIDER_ORDER
   const lockSiderCards = appConfig?.lockSiderCards ?? false
@@ -87,7 +88,10 @@ const SiderCards = (props: Props): React.JSX.Element => {
         return
       }
     }
-    const dest = SIDER_CARD_ROUTES[activeId]
+    const dest =
+      activeId === 'profile' && appConfig?.operationMode === 'simple'
+        ? '/simple'
+        : SIDER_CARD_ROUTES[activeId]
     if (dest) navigate(dest)
   }
 
@@ -101,10 +105,12 @@ const SiderCards = (props: Props): React.JSX.Element => {
     return closestCorners(args)
   }
 
-  const cards = order.map((key) => {
-    const Component = componentMap[key]
-    return <Component key={key} iconOnly={iconOnly} />
-  })
+  const cards = order
+    .filter((key) => appConfig?.operationMode !== 'simple' || key !== 'override')
+    .map((key) => {
+      const Component = componentMap[key]
+      return <Component key={key} iconOnly={iconOnly} expanded={expanded} />
+    })
 
   if (iconOnly) {
     return (

@@ -283,6 +283,8 @@ interface ISmartModelStatus {
 }
 
 interface IAppConfig {
+  operationMode?: 'standard' | 'simple'
+  modeSelected?: boolean
   core: 'mihomo' | 'mihomo-alpha' | 'mihomo-smart' | 'mihomo-specific'
   specificVersion?: string
   enableSmartCore: boolean
@@ -372,6 +374,7 @@ interface IAppConfig {
   githubProxy?: string
   silentStart: boolean
   autoCloseConnection: boolean
+  autoCloseConnectionOnlyGroup?: boolean
   sysProxy: ISysProxyConfig
   maxLogDays: number
   maxLogFileSize: number
@@ -387,9 +390,11 @@ interface IAppConfig {
   subscriptionTimeout?: number
   encryptedPassword?: number[]
   controlDns?: boolean
+  disableDnsOverrideGuard?: boolean
   controlSniff?: boolean
   useDockIcon?: boolean
   showTraffic?: boolean
+  trayTrafficTextColor?: 'auto' | 'white' | 'black'
   disableTrayIconColor?: boolean
   customTrayIcon?: string
   customTrayIcons?: ICustomTrayIcons
@@ -756,4 +761,9 @@ interface IPluginVault {
 interface IPluginStaleDevice {
   deviceId: string
   devicePrivKey: string
+}
+
+interface IAppInfo {
+  name: string
+  icon: string
 }

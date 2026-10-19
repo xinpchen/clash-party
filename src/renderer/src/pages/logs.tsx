@@ -1,7 +1,7 @@
 import BasePage from '@renderer/components/base/base-page'
 import LogItem from '@renderer/components/logs/log-item'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Divider, Input } from '@heroui/react'
+import { Button, Divider, Input, Select, SelectItem } from '@heroui/react'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { IoLocationSharp } from 'react-icons/io5'
 import { CgTrash } from 'react-icons/cg'
@@ -9,8 +9,16 @@ import { useTranslation } from 'react-i18next'
 import { includesIgnoreCase } from '@renderer/utils/includes'
 
 const LOGS_FILTER_KEY = 'logs-filter'
+const LOGS_LEVEL_FILTER_KEY = 'logs-level-filter'
 const MAX_CACHED_LOGS = 500
 const LOG_RENDER_INTERVAL_MS = 100
+const logLevelOrder: Record<LogLevel, number> = {
+  silent: 0,
+  error: 1,
+  warning: 2,
+  info: 3,
+  debug: 4
+}
 
 const cachedLogs: {
   log: IMihomoLogInfo[]
@@ -54,20 +62,32 @@ const Logs: React.FC = () => {
   const [filter, setFilter] = useState(() => {
     return localStorage.getItem(LOGS_FILTER_KEY) || ''
   })
+  const [levelFilter, setLevelFilter] = useState<LogLevel>(() => {
+    const savedLevel = localStorage.getItem(LOGS_LEVEL_FILTER_KEY)
+    return savedLevel && savedLevel in logLevelOrder ? (savedLevel as LogLevel) : 'debug'
+  })
   const [trace, setTrace] = useState(true)
 
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
   const filteredLogs = useMemo(() => {
-    if (filter === '') return logs
     return logs.filter((log) => {
-      return includesIgnoreCase(log.payload, filter) || includesIgnoreCase(log.type, filter)
+      return (
+        logLevelOrder[log.type] <= logLevelOrder[levelFilter] &&
+        (filter === '' ||
+          includesIgnoreCase(log.payload, filter) ||
+          includesIgnoreCase(log.type, filter))
+      )
     })
-  }, [logs, filter])
+  }, [logs, filter, levelFilter])
 
   useEffect(() => {
     localStorage.setItem(LOGS_FILTER_KEY, filter)
   }, [filter])
+
+  useEffect(() => {
+    localStorage.setItem(LOGS_LEVEL_FILTER_KEY, levelFilter)
+  }, [levelFilter])
 
   useEffect(() => {
     const old = cachedLogs.trigger
@@ -100,6 +120,23 @@ const Logs: React.FC = () => {
             isClearable
             onValueChange={setFilter}
           />
+          <Select
+            size="sm"
+            className="ml-2 w-28 shrink-0"
+            aria-label={t('mihomo.selectLogLevel')}
+            selectedKeys={[levelFilter]}
+            disallowEmptySelection
+            onSelectionChange={(selection) => {
+              const level = selection.currentKey
+              if (level && level in logLevelOrder) setLevelFilter(level as LogLevel)
+            }}
+          >
+            <SelectItem key="silent">{t('mihomo.silent')}</SelectItem>
+            <SelectItem key="error">{t('mihomo.error')}</SelectItem>
+            <SelectItem key="warning">{t('mihomo.warning')}</SelectItem>
+            <SelectItem key="info">{t('mihomo.info')}</SelectItem>
+            <SelectItem key="debug">{t('mihomo.debug')}</SelectItem>
+          </Select>
           <Button
             size="sm"
             isIconOnly

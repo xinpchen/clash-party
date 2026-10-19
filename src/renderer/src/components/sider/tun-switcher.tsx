@@ -1,24 +1,25 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter } from '@heroui/react'
 import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-config'
 import BorderSwitch from '@renderer/components/base/border-switch'
 import { TbDeviceIpadHorizontalBolt } from 'react-icons/tb'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { updateTrayIconImmediate } from '@renderer/utils/ipc'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import React from 'react'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { useTranslation } from 'react-i18next'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const TunSwitcher: React.FC<Props> = (props) => {
   const { t } = useTranslation()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/tun') || false
   const { appConfig } = useAppConfig()
   const { tunCardStatus = 'col-span-1', disableAnimations = false } = appConfig || {}
@@ -105,21 +106,20 @@ const TunSwitcher: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${tunCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.tun')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/tun')
-            }}
-          >
-            <TbDeviceIpadHorizontalBolt className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={tunCardStatus}
+        title={t('sider.cards.tun')}
+        route="/tun"
+        icon={<TbDeviceIpadHorizontalBolt className="text-[20px]" />}
+        expanded={expanded}
+      >
+        <BorderSwitch
+          aria-label={t('sider.cards.tun')}
+          isShowBorder={match && enable}
+          isSelected={enable ?? false}
+          onValueChange={onChange}
+        />
+      </SiderItem>
     )
   }
 

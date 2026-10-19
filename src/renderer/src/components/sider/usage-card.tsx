@@ -1,7 +1,7 @@
 import { Button, Card, CardBody, CardFooter, Progress, Tooltip } from '@heroui/react'
 import BorderSwitch from '@renderer/components/base/border-switch'
 import { mihomoProxyProviders } from '@renderer/utils/ipc'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { calcTraffic, calcPercent } from '@renderer/utils/calc'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -12,13 +12,15 @@ import { useTranslation } from 'react-i18next'
 import useSWR from 'swr'
 import dayjs from '@renderer/utils/dayjs'
 import { DEFAULT_ENABLE_TRAFFIC_LOGGER } from '../../../../shared/appConfig'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const UsageCard: React.FC<Props> = (props) => {
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const { t } = useTranslation()
   const { appConfig, patchAppConfig } = useAppConfig()
   const {
@@ -27,7 +29,6 @@ const UsageCard: React.FC<Props> = (props) => {
     enableTrafficLogger = DEFAULT_ENABLE_TRAFFIC_LOGGER
   } = appConfig || {}
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/traffic')
 
   const { data } = useSWR('mihomoProxyProviders', mihomoProxyProviders)
@@ -68,19 +69,15 @@ const UsageCard: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${usageCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.traffic')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => navigate('/traffic')}
-          >
-            <MdOutlineDataUsage className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={usageCardStatus}
+        title={t('sider.cards.traffic')}
+        route="/traffic"
+        icon={<MdOutlineDataUsage className="text-[20px]" />}
+        expanded={expanded}
+      >
+        {loggerSwitch}
+      </SiderItem>
     )
   }
 

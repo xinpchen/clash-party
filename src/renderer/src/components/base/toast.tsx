@@ -51,7 +51,8 @@ export const toast = {
   error: (message: string, title?: string): void => addToast('error', message, title, 1800),
   warning: (message: string, title?: string, duration?: number): void =>
     addToast('warning', message, title, duration),
-  info: (message: string, title?: string): void => addToast('info', message, title),
+  info: (message: string, title?: string, duration?: number): void =>
+    addToast('info', message, title, duration),
   detailedError: (message: string, title?: string): void =>
     addDetailedToast('error', message, title)
 }
@@ -123,7 +124,7 @@ const ToastItem: React.FC<{
         <div className="flex items-center justify-between overflow-visible">
           <div className="flex items-center gap-3">
             <div
-              className={`flex-shrink-0 w-8 h-8 ${iconBg} rounded-full flex items-center justify-center`}
+              className={`shrink-0 w-8 h-8 ${iconBg} rounded-full flex items-center justify-center`}
             >
               {icon}
             </div>
@@ -154,7 +155,7 @@ const ToastItem: React.FC<{
           </div>
         </div>
         <div className="bg-default-100 rounded-lg p-3 max-h-60 overflow-y-auto scrollbar-thin">
-          <pre className="text-xs text-foreground-600 whitespace-pre-wrap break-words font-mono select-text leading-relaxed">
+          <pre className="text-xs text-foreground-600 whitespace-pre-wrap wrap-break-word font-mono select-text leading-relaxed">
             {data.message}
           </pre>
         </div>
@@ -180,23 +181,21 @@ const ToastItem: React.FC<{
       `}
       style={{ width: 340 }}
     >
-      <div
-        className={`flex-shrink-0 w-7 h-7 ${iconBg} rounded-full flex items-center justify-center`}
-      >
+      <div className={`shrink-0 w-7 h-7 ${iconBg} rounded-full flex items-center justify-center`}>
         {icon}
       </div>
       <div className="flex-1 min-w-0">
         {data.title && <p className="text-sm font-medium text-foreground">{data.title}</p>}
-        <p className="text-sm text-foreground-500 break-words select-text">{data.message}</p>
+        <p className="text-sm text-foreground-500 wrap-break-word select-text">{data.message}</p>
       </div>
       <button
         onClick={handleClose}
-        className="flex-shrink-0 p-1 rounded-full hover:bg-default-200/60 transition-colors"
+        className="shrink-0 p-1 rounded-full hover:bg-default-200/60 transition-colors"
       >
         <IoClose className="text-base text-foreground-400" />
       </button>
       <div
-        className={`absolute bottom-0 left-0 h-[2px] ${iconBg} toast-progress`}
+        className={`absolute bottom-0 left-0 h-0.5 ${iconBg} toast-progress`}
         style={{ animationDuration: `${duration}ms` }}
       />
     </div>
@@ -223,7 +222,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {children}
       {currentToasts.length > 0 &&
         createPortal(
-          <div className="fixed top-[60px] right-4 z-[9999] flex flex-col gap-2">
+          <div className="fixed top-15 right-4 z-9999 flex flex-col gap-2">
             {currentToasts.map((t) => (
               <ToastItem key={t.id} data={t} onRemove={handleRemove} />
             ))}

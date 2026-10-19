@@ -1,23 +1,24 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter } from '@heroui/react'
 import React from 'react'
 import { MdFormatOverline } from 'react-icons/md'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { useTranslation } from 'react-i18next'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const OverrideCard: React.FC<Props> = (props) => {
   const { t } = useTranslation()
   const { appConfig } = useAppConfig()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const { overrideCardStatus = 'col-span-1', disableAnimations = false } = appConfig || {}
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/override')
   const {
     attributes,
@@ -32,23 +33,16 @@ const OverrideCard: React.FC<Props> = (props) => {
   const transform = tf ? { x: tf.x, y: tf.y, scaleX: 1, scaleY: 1 } : null
   if (iconOnly) {
     return (
-      <div className={`${overrideCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.override')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/override')
-            }}
-          >
-            <MdFormatOverline className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={overrideCardStatus}
+        title={t('sider.cards.override')}
+        route="/override"
+        icon={<MdFormatOverline className="text-[20px]" />}
+        expanded={expanded}
+      />
     )
   }
+
   return (
     <div
       style={{

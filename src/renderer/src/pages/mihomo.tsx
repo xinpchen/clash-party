@@ -559,6 +559,7 @@ const Mihomo: React.FC = () => {
                       </Tooltip>
                     </div>
                   }
+                  divider
                 >
                   <div className="flex items-center gap-2">
                     <Input

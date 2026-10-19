@@ -162,6 +162,14 @@ export function mihomoWorkConfigPath(id: string | undefined): string {
   }
 }
 
+export function simpleConfigPath(): string {
+  return path.join(dataDir(), 'simple-config.yaml')
+}
+
+export function simpleOutputPath(): string {
+  return path.join(dataDir(), 'simple-config.generated.yaml')
+}
+
 export function logDir(): string {
   return path.join(dataDir(), 'logs')
 }

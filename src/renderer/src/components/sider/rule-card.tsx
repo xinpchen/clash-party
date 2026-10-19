@@ -1,24 +1,25 @@
-import { Button, Card, CardBody, CardFooter, Chip, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter, Chip } from '@heroui/react'
 import { MdOutlineAltRoute } from 'react-icons/md'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useRules } from '@renderer/hooks/use-rules'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const RuleCard: React.FC<Props> = (props) => {
   const { t } = useTranslation()
   const { appConfig } = useAppConfig()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const { ruleCardStatus = 'col-span-1', disableAnimations = false } = appConfig || {}
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/rules')
   const { rules } = useRules()
   const {
@@ -35,23 +36,16 @@ const RuleCard: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${ruleCardStatus} flex justify-center`}>
-        <Tooltip content={t('sider.cards.rules')} placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/rules')
-            }}
-          >
-            <MdOutlineAltRoute className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={ruleCardStatus}
+        title={t('sider.cards.rules')}
+        route="/rules"
+        icon={<MdOutlineAltRoute className="text-[20px]" />}
+        expanded={expanded}
+      />
     )
   }
+
   return (
     <div
       style={{
